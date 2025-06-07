@@ -1,0 +1,166 @@
+# Cursor Instructions for TykBasic Project
+
+## Project Overview
+TykBasic is a streamlined frontend application for managing Tyk Gateway APIs, organizations, users, and authentication methods. The project uses the Tyk Gateway API to provide comprehensive API management capabilities.
+
+## Key Documentation Files
+
+### 1. API Specifications
+- **gateway-swagger.yml** - Complete Tyk Gateway API specification
+
+### 2. Implementation Guide
+- **TYK_FRONTEND_IMPLEMENTATION_GUIDE.md** - Comprehensive guide with:
+  - Architecture recommendations
+  - Complete code examples for all major functions
+  - Database schema suggestions
+  - Security best practices
+  - Frontend component examples
+  - Error handling patterns
+
+### 3. Test Examples
+- **tests/test-tyk-api.js** - Comprehensive test suite covering all 55 Gateway API endpoints
+- **tests/test-api-server.js** - Test server implementation
+- **cert-generator.js** - Certificate generation utilities
+
+## Development Guidelines
+
+### When writing code for this project:
+
+1. **API Usage Reference**: Always consult `gateway-swagger.yml` for accurate endpoint specifications, parameters, and request/response formats.
+
+2. **Implementation Patterns**: Refer to `TYK_FRONTEND_IMPLEMENTATION_GUIDE.md` for:
+   - Proper authentication header setup (`x-tyk-authorization`)
+   - Error handling patterns
+   - Key and certificate management
+   - Organization and user management workflows
+
+3. **Working Examples**: Check `tests/test-tyk-api.js` for real working examples of:
+   - How to call each API endpoint
+   - Proper request body formatting
+   - Parameter handling (hashed keys, org IDs, etc.)
+   - Resource creation and management patterns
+   - Certificate handling for mTLS authentication
+
+### API Authentication
+All Tyk Gateway API calls require:
+```javascript
+const headers = {
+  'x-tyk-authorization': 'your-gateway-secret',
+  'Content-Type': 'application/json'
+};
+```
+
+### Key Implementation Areas
+
+#### Organization Management
+- Organizations must be pre-configured or managed at application level
+- Gateway API manages organization-level rate limiting via org keys
+- Reference implementation guide section "1. Organization Management"
+- See test examples for organization key management
+
+#### User Authentication Setup
+- **mTLS Authentication**: See cert-generator.js and test examples
+- **Token + HMAC**: Reference implementation guide section "4. Token + HMAC Authentication Setup"
+- **Self-service vs Admin-managed**: Implementation guide section "6. Self-Service vs Admin-Managed Implementation"
+
+#### API Management
+- Creating APIs: Reference gateway-swagger.yml `/tyk/apis` endpoints
+- Granting access: See test examples for access_rights configuration
+- OAS vs Classic APIs: Note separate ID spaces and endpoints
+
+### Common Patterns from Tests
+
+#### Key Creation
+```javascript
+// Standard key creation
+const keyData = {
+  org_id: "default",
+  allowance: 1000,
+  rate: 1000,
+  per: 60,
+  access_rights: {
+    "api-id": {
+      api_id: "api-id",
+      api_name: "API Name",
+      versions: ["Default"]
+    }
+  }
+};
+```
+
+#### Certificate Handling
+```javascript
+// Certificate upload (Content-Type: text/plain)
+const certResponse = await fetch('/tyk/certs', {
+  method: 'POST',
+  headers: {
+    'x-tyk-authorization': secret,
+    'Content-Type': 'text/plain'
+  },
+  body: certificatePemString // Raw certificate, not JSON
+});
+```
+
+#### Error Handling
+```javascript
+// Standard error handling pattern
+if (!response.ok) {
+  switch (response.status) {
+    case 403: // Check authorization header
+    case 404: // Resource not found
+    case 400: // Check request format
+    default: // Log full error context
+  }
+}
+```
+
+### Important API Quirks (from test experience)
+
+1. **Key Operations**: Use `hashed=true` parameter when working with key IDs
+2. **Organization Keys**: Require `orgID` parameter to specify which organization (e.g., `orgID=default` for default org)  
+3. **Certificate Endpoints**: Require `Content-Type: text/plain` and raw PEM data
+4. **Resource Creation**: Newly created resources may not be immediately available (eventual consistency)
+5. **OAS vs Classic APIs**: Different ID spaces, don't mix them
+6. **Policy-based Keys**: Need `apply_policies` array in request body
+
+### Database Schema
+Refer to implementation guide for recommended database schema including:
+- organizations table
+- users table  
+- user_credentials table
+- api_definitions table
+- api_access_grants table
+
+### Testing and Validation
+- Run `tests/test-tyk-api.js` to validate Gateway API connectivity
+- Use `docker-compose.yml` for local Tyk Gateway + Redis setup
+- Test file demonstrates proper resource cleanup patterns
+
+### Security Considerations
+- Store secrets properly (Vault, AWS Secrets Manager, etc.)
+- Implement proper certificate storage and access controls
+- Use audit logging for all administrative actions
+- Validate all uploads and API definitions
+- Implement rate limiting on frontend APIs
+
+## File Structure Context
+```
+tyk/
+├── gateway-swagger.yml           # Primary API specification
+├── TYK_FRONTEND_IMPLEMENTATION_GUIDE.md  # Complete implementation guide
+├── cert-generator.js            # Certificate utilities
+├── docker-compose.yml           # Local development environment
+├── tyk.conf                     # Tyk configuration reference
+├── tests/
+│   ├── test-tyk-api.js         # Comprehensive API test examples
+│   └── test-api-server.js      # Test server implementation
+└── .cursorrules                # This file
+```
+
+## When in doubt:
+1. Check the swagger files for API specifications
+2. Reference the implementation guide for patterns and best practices  
+3. Look at the test files for working examples
+4. The test file is particularly valuable as it shows exactly how each endpoint works in practice
+
+This project represents a comprehensive understanding of the Tyk Gateway API gained through extensive testing and analysis. Use these resources to build a robust, secure frontend for Tyk Gateway management. 

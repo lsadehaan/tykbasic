@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - tyk
+    restart: unless-stopped
+
+  tyk-gateway:
+    image: tykio/tyk-gateway:v5.8.1
+    ports:
+      - "8080:8080"
+    environment:
+      - TYK_GW_REDISHOST=redis
+      - TYK_GW_REDISPORT=6379
+    depends_on:
+      - redis
+    volumes:
+      - ./tyk-configs/tyk.conf:/opt/tyk-gateway/tyk.conf
+      - ./tyk-configs/apps:/opt/tyk-gateway/apps
+      - ./tyk-configs/middleware:/opt/tyk-gateway/middleware
+    networks:
+      - tyk
+    restart: unless-stopped
+
+  tykbasic:
+    build: .
+    ports:
+      - "3001:3001"
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - TYK_GATEWAY_URL=http://tyk-gateway:8080
+      - TYK_SECRET=${TYK_SECRET:-your-gateway-secret-here}
+      - JWT_SECRET=${JWT_SECRET:-your-jwt-secret-here}
+      - SESSION_SECRET=${SESSION_SECRET:-your-session-secret-here}
+      - FRONTEND_URL=http://localhost:3000
+      - PORT=3001
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    depends_on:
+      - tyk-gateway
+      - redis
+    networks:
+      - tyk
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+
+networks:
+  tyk:
+    driver: bridge 

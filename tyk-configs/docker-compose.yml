@@ -1,0 +1,32 @@
+services:
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - tyk
+
+  tyk-gateway:
+    image: tykio/tyk-gateway:v5.8.1
+    ports:
+      - "8080:8080"
+    environment:
+      - TYK_GW_REDISHOST=redis
+      - TYK_GW_REDISPORT=6379
+    depends_on:
+      - redis
+    volumes:
+      - ./tyk.conf:/opt/tyk-gateway/tyk.conf
+      - ./apps:/opt/tyk-gateway/apps
+      - ./middleware:/opt/tyk-gateway/middleware
+    networks:
+      - tyk
+
+volumes:
+  redis_data:
+
+networks:
+  tyk:
+    driver: bridge
