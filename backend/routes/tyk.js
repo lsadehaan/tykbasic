@@ -722,6 +722,224 @@ router.delete('/keys/:keyId', async (req, res) => {
   }
 });
 
+// Certificate Management
+router.get('/certificates', async (req, res) => {
+  const requestId = Math.random().toString(36).substring(7);
+  
+  try {
+    console.log(`📋 [${requestId}] Fetching certificates for user: ${req.user.email}`);
+    
+    const certificates = await tykGatewayService.getCertificates('default');
+    
+    await logTykOperation(req, 'list_certificates', 'certificate', null, {
+      requestId: requestId,
+      certificateCount: Array.isArray(certificates) ? certificates.length : Object.keys(certificates || {}).length
+    });
+
+    res.json({
+      success: true,
+      data: certificates,
+      count: Array.isArray(certificates) ? certificates.length : Object.keys(certificates || {}).length,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`💥 [${requestId}] Failed to fetch certificates:`, error);
+    
+    await logTykOperation(req, 'list_certificates', 'certificate', null, {
+      requestId: requestId
+    }, error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch certificates',
+      error: error.message
+    });
+  }
+});
+
+router.post('/certificates/generate', async (req, res) => {
+  const requestId = Math.random().toString(36).substring(7);
+  
+  try {
+    console.log(`🔧 [${requestId}] Generating certificate for user: ${req.user.email}`);
+    
+    const {
+      commonName = 'localhost',
+      organization = 'TykBasic',
+      organizationalUnit = 'Test Department',
+      locality = 'Test City',
+      state = 'Test State',
+      country = 'US',
+      validityDays = 365
+    } = req.body;
+
+    // Use the existing cert-generator utility
+    const { generateSelfSignedCert } = require('../../tyk-configs/cert-generator');
+    
+    const certData = generateSelfSignedCert({
+      commonName,
+      organization,
+      organizationalUnit,
+      locality,
+      state,
+      country,
+      validityDays
+    });
+    
+    await logTykOperation(req, 'generate_certificate', 'certificate', 'generated', {
+      requestId: requestId,
+      commonName: commonName,
+      organization: organization,
+      validityDays: validityDays
+    });
+
+    res.status(200).json({
+      success: true,
+      certificate: certData.certificate,
+      privateKey: certData.privateKey,
+      info: certData.info,
+      message: 'Certificate generated successfully',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`💥 [${requestId}] Failed to generate certificate:`, error);
+    
+    await logTykOperation(req, 'generate_certificate', 'certificate', null, {
+      requestId: requestId
+    }, error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate certificate',
+      error: error.message
+    });
+  }
+});
+
+router.post('/certificates', async (req, res) => {
+  const requestId = Math.random().toString(36).substring(7);
+  
+  try {
+    console.log(`📋 [${requestId}] Uploading certificate for user: ${req.user.email}`);
+    
+    const { certificate, name, description } = req.body;
+    
+    if (!certificate) {
+      return res.status(400).json({
+        success: false,
+        message: 'Certificate PEM data is required'
+      });
+    }
+
+    // Validate certificate format (basic check)
+    if (!certificate.includes('-----BEGIN CERTIFICATE-----')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid certificate format. Must be PEM encoded.'
+      });
+    }
+    
+    const result = await tykGatewayService.uploadCertificate(certificate, 'default');
+    
+    await logTykOperation(req, 'upload_certificate', 'certificate', result.id || result.key, {
+      requestId: requestId,
+      certificateName: name || 'unnamed',
+      description: description || ''
+    });
+
+    res.status(201).json({
+      success: true,
+      data: result,
+      message: 'Certificate uploaded successfully',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`💥 [${requestId}] Failed to upload certificate:`, error);
+    
+    await logTykOperation(req, 'upload_certificate', 'certificate', null, {
+      requestId: requestId
+    }, error);
+
+    res.status(error.status || 500).json({
+      success: false,
+      message: 'Failed to upload certificate',
+      error: error.message
+    });
+  }
+});
+
+router.get('/certificates/:certId', async (req, res) => {
+  const requestId = Math.random().toString(36).substring(7);
+  const { certId } = req.params;
+  
+  try {
+    console.log(`📋 [${requestId}] Fetching certificate ${certId} for user: ${req.user.email}`);
+    
+    const certificate = await tykGatewayService.getCertificate(certId, 'default');
+    
+    await logTykOperation(req, 'get_certificate', 'certificate', certId, {
+      requestId: requestId
+    });
+
+    res.json({
+      success: true,
+      data: certificate,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`💥 [${requestId}] Failed to fetch certificate ${certId}:`, error);
+    
+    await logTykOperation(req, 'get_certificate', 'certificate', certId, {
+      requestId: requestId
+    }, error);
+
+    res.status(error.status || 500).json({
+      success: false,
+      message: `Failed to fetch certificate ${certId}`,
+      error: error.message
+    });
+  }
+});
+
+router.delete('/certificates/:certId', async (req, res) => {
+  const requestId = Math.random().toString(36).substring(7);
+  const { certId } = req.params;
+  
+  try {
+    console.log(`🗑️ [${requestId}] Deleting certificate ${certId} for user: ${req.user.email}`);
+    
+    const result = await tykGatewayService.deleteCertificate(certId, 'default');
+    
+    await logTykOperation(req, 'delete_certificate', 'certificate', certId, {
+      requestId: requestId
+    });
+
+    res.json({
+      success: true,
+      data: result,
+      message: 'Certificate deleted successfully',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`💥 [${requestId}] Failed to delete certificate ${certId}:`, error);
+    
+    await logTykOperation(req, 'delete_certificate', 'certificate', certId, {
+      requestId: requestId
+    }, error);
+
+    res.status(error.status || 500).json({
+      success: false,
+      message: `Failed to delete certificate ${certId}`,
+      error: error.message
+    });
+  }
+});
+
 // Gateway Operations
 router.post('/gateway/reload', async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);

@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import KeyCreationModal from './KeyCreationModal';
 import KeySuccessModal from './KeySuccessModal';
 import KeyManagement from '../KeyManagement';
+import CertificateManagement from '../CertificateManagement';
 import './Dashboard.css';
 
 const Dashboard = () => {
@@ -279,6 +280,8 @@ const Dashboard = () => {
     switch (activeView) {
       case 'keys':
         return <KeyManagement />;
+      case 'certificates':
+        return <CertificateManagement />;
       case 'dashboard':
       default:
         return (
@@ -345,6 +348,13 @@ const Dashboard = () => {
                       disabled={loading}
                     >
                       👁️ Manage API Keys
+                    </button>
+                    <button 
+                      className="action-btn secondary" 
+                      onClick={() => setActiveView('certificates')}
+                      disabled={loading}
+                    >
+                      📜 Manage Certificates
                     </button>
                     <button 
                       className="action-btn secondary" 
@@ -443,6 +453,12 @@ const Dashboard = () => {
               onClick={() => setActiveView('keys')}
             >
               🔑 API Keys
+            </button>
+            <button 
+              className={`nav-btn ${activeView === 'certificates' ? 'active' : ''}`}
+              onClick={() => setActiveView('certificates')}
+            >
+              📜 Certificates
             </button>
             {user && ['super_admin', 'admin'].includes(user.role) && (
               <Link to="/admin" className="nav-btn admin-link">
