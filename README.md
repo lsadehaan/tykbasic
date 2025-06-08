@@ -252,9 +252,34 @@ NODE_ENV=production npm run backend:start
 
 MIT License - see LICENSE file for details.
 
+## 🛠️ Troubleshooting
+
+### Login Issues After User Approval
+
+If users can't login after being approved by an admin, this may be due to a password double-hashing bug that was fixed. Use the recovery script:
+
+```bash
+# Fix specific user who can't login
+cd backend
+node scripts/fix-double-hashed-passwords.js fix-user user@example.com
+
+# The user can then login with temporary password: TempPass123!
+# They should reset their password immediately
+```
+
+For more details, see `PASSWORD_FIX_DOCUMENTATION.md`.
+
+### Common Issues
+
+1. **Tyk Gateway Connection**: Verify `TYK_SECRET` and `TYK_GATEWAY_URL` are correct
+2. **Database Issues**: Check SQLite file permissions in `data/` directory
+3. **Port Conflicts**: Ensure ports 3000, 3001, 8080 are available
+4. **Docker Issues**: Run `docker-compose logs` to check container status
+
 ## 🆘 Support
 
 - **Documentation**: Check `TYK_FRONTEND_IMPLEMENTATION_GUIDE.md`
+- **Password Issues**: See `PASSWORD_FIX_DOCUMENTATION.md`
 - **Issues**: Create a GitHub issue
 - **Tests**: Run `tests/test-tyk-api.js` for API validation
 

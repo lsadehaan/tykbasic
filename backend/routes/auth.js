@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
+const { v4: uuidv4 } = require('uuid');
 const { User, Organization, EmailWhitelist, PendingUser, AuditLog } = require('../models');
 const { Op } = require('sequelize');
 
@@ -10,7 +11,7 @@ const router = express.Router();
 // Rate limiting for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 requests per windowMs
+  max: 20, // limit each IP to 20 requests per windowMs (increased for testing)
   message: 'Too many authentication attempts, please try again later.',
   trustProxy: false
 });
@@ -159,6 +160,8 @@ router.post('/register', authLimiter, async (req, res) => {
       first_name: firstName,
       last_name: lastName,
       organization_id: organization.id,
+      registration_token: uuidv4(), // Ensure token is generated
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
       additional_info: {
         userAgent: req.get('User-Agent'),
         ip: req.ip,
@@ -279,6 +282,38 @@ router.post('/login', authLimiter, async (req, res) => {
       });
     }
 
+    // Check if account is locked
+    if (user.isAccountLocked()) {
+      console.log(`🔒 [${requestId}] Locked account login attempt:`, {
+        userId: user.id,
+        email: user.email,
+        lockedUntil: user.account_locked_until,
+        failedAttempts: user.failed_login_attempts,
+        ip: clientIP
+      });
+      
+      // Log failed login attempt due to lock
+      await AuditLog.create({
+        action: 'login_failed',
+        resource_type: 'user',
+        resource_id: user.id,
+        details: { 
+          reason: 'account_locked',
+          requestId: requestId,
+          lockedUntil: user.account_locked_until,
+          failedAttempts: user.failed_login_attempts
+        },
+        ip_address: req.ip,
+        user_agent: req.get('User-Agent')
+      });
+
+      const lockoutMinutes = Math.ceil((user.account_locked_until - new Date()) / (1000 * 60));
+      return res.status(423).json({
+        error: 'Account locked',
+        message: `Account is temporarily locked due to too many failed login attempts. Try again in ${lockoutMinutes} minutes.`
+      });
+    }
+
     console.log(`🔑 [${requestId}] Validating password for user: ${user.email}`);
     
     // Check password
@@ -301,6 +336,9 @@ router.post('/login', authLimiter, async (req, res) => {
         ip: clientIP
       });
       
+      // Increment failed login attempts
+      await user.incrementFailedLoginAttempts();
+
       // Log failed login attempt
       await AuditLog.create({
         action: 'login_failed',
@@ -309,19 +347,58 @@ router.post('/login', authLimiter, async (req, res) => {
         details: { 
           reason: 'invalid_password',
           requestId: requestId,
-          failedAttempts: user.failed_login_attempts + 1
+          failedAttempts: user.failed_login_attempts
         },
         ip_address: req.ip,
         user_agent: req.get('User-Agent')
       });
 
+      // Check if account is now locked after this attempt
+      const lockoutMessage = user.isAccountLocked() 
+        ? ` Account has been temporarily locked due to too many failed attempts.`
+        : '';
+
       return res.status(401).json({
         error: 'Invalid credentials',
-        message: 'Invalid email or password.'
+        message: `Invalid email or password.${lockoutMessage}`
       });
     }
 
     console.log(`✅ [${requestId}] Password valid, updating login tracking for: ${user.email}`);
+
+    // Check if password reset is required
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const needsPasswordReset = user.last_password_change && user.last_password_change < oneWeekAgo;
+    
+    if (needsPasswordReset) {
+      console.log(`🔄 [${requestId}] Password reset required for user: ${user.email}`, {
+        lastPasswordChange: user.last_password_change,
+        oneWeekAgo: oneWeekAgo
+      });
+      
+      // Log password reset required
+      await AuditLog.create({
+        action: 'login_password_reset_required',
+        resource_type: 'user',
+        resource_id: user.id,
+        user_id: user.id,
+        organization_id: user.organization_id,
+        details: { 
+          reason: 'admin_forced_reset',
+          lastPasswordChange: user.last_password_change,
+          requestId: requestId
+        },
+        ip_address: req.ip,
+        user_agent: req.get('User-Agent')
+      });
+
+      return res.status(202).json({
+        error: 'Password reset required',
+        message: 'Your password must be changed. Please use the password reset process.',
+        action: 'password_reset_required',
+        email: user.email
+      });
+    }
 
     // Update last login
     const loginUpdateStart = Date.now();
@@ -476,6 +553,273 @@ router.get('/me', authenticateToken, async (req, res) => {
     res.status(500).json({
       error: 'Failed to get user info',
       message: 'An error occurred while retrieving user information.'
+    });
+  }
+});
+
+// Password reset request endpoint
+router.post('/password-reset', authLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'Missing email',
+        message: 'Email address is required for password reset.'
+      });
+    }
+
+    const user = await User.findByEmail(email);
+    
+    if (!user) {
+      // Return success even if user doesn't exist (security best practice)
+      return res.json({
+        message: 'If an account with that email exists, a password reset link has been sent.',
+        email: email.toLowerCase()
+      });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({
+        error: 'Account inactive',
+        message: 'Cannot reset password for inactive account.'
+      });
+    }
+
+    // Generate reset token
+    const resetToken = user.generatePasswordResetToken();
+    await user.save();
+
+    // Log password reset request
+    await AuditLog.create({
+      action: 'password_reset_requested',
+      resource_type: 'user',
+      resource_id: user.id,
+      details: { 
+        email: user.email,
+        token_expires: user.password_reset_expires
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent')
+    });
+
+    // Send password reset email
+    try {
+      const emailService = require('../services/emailService');
+      const emailResult = await emailService.sendPasswordResetEmail(
+        user.email, 
+        resetToken, 
+        user.first_name
+      );
+
+      if (emailResult.success) {
+        console.log(`✅ Password reset email sent to ${user.email}`);
+        
+        // Log successful email sending
+        await AuditLog.create({
+          action: 'password_reset_email_sent',
+          resource_type: 'user',
+          resource_id: user.id,
+          details: { 
+            email: user.email,
+            messageId: emailResult.messageId
+          },
+          ip_address: req.ip,
+          user_agent: req.get('User-Agent')
+        });
+      } else {
+        console.error(`❌ Failed to send password reset email to ${user.email}:`, emailResult.error);
+        
+        // Log failed email sending
+        await AuditLog.create({
+          action: 'password_reset_email_failed',
+          resource_type: 'user',
+          resource_id: user.id,
+          details: { 
+            email: user.email,
+            error: emailResult.error
+          },
+          ip_address: req.ip,
+          user_agent: req.get('User-Agent')
+        });
+      }
+    } catch (emailError) {
+      console.error('Email service error during password reset:', emailError);
+      
+      // Log email service error
+      await AuditLog.create({
+        action: 'password_reset_email_error',
+        resource_type: 'user',
+        resource_id: user.id,
+        details: { 
+          email: user.email,
+          error: emailError.message
+        },
+        ip_address: req.ip,
+        user_agent: req.get('User-Agent')
+      });
+    }
+
+    // For development, also log the reset link to console
+    if (process.env.NODE_ENV === 'development') {
+      const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
+      console.log(`🔗 Password reset link for ${user.email}: ${resetLink}`);
+    }
+
+    res.json({
+      message: 'If an account with that email exists, a password reset link has been sent.',
+      email: email.toLowerCase()
+    });
+
+  } catch (error) {
+    console.error('Password reset request error:', error);
+    res.status(500).json({
+      error: 'Password reset failed',
+      message: 'An error occurred during password reset. Please try again.'
+    });
+  }
+});
+
+// Password reset confirmation endpoint
+router.post('/password-reset/confirm', authLimiter, async (req, res) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token || !password) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'Reset token and new password are required.'
+      });
+    }
+
+    // Password strength validation
+    if (password.length < 8) {
+      return res.status(400).json({
+        error: 'Weak password',
+        message: 'Password must be at least 8 characters long.'
+      });
+    }
+
+    const user = await User.findOne({
+      where: {
+        password_reset_token: token,
+        password_reset_expires: {
+          [Op.gt]: new Date()
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        error: 'Invalid or expired token',
+        message: 'Password reset token is invalid or has expired.'
+      });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({
+        error: 'Account inactive',
+        message: 'Cannot reset password for inactive account.'
+      });
+    }
+
+    // Update password and clear reset token
+    user.password = password;
+    user.password_reset_token = null;
+    user.password_reset_expires = null;
+    user.failed_login_attempts = 0;
+    user.account_locked_until = null;
+    await user.save();
+
+    // Log successful password reset
+    await AuditLog.create({
+      action: 'password_reset_completed',
+      resource_type: 'user',
+      resource_id: user.id,
+      user_id: user.id,
+      details: { 
+        email: user.email,
+        reset_method: 'token'
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent')
+    });
+
+    res.json({
+      message: 'Password reset successful. You can now log in with your new password.',
+      email: user.email
+    });
+
+  } catch (error) {
+    console.error('Password reset confirm error:', error);
+    res.status(500).json({
+      error: 'Password reset failed',
+      message: 'An error occurred during password reset. Please try again.'
+    });
+  }
+});
+
+// Email verification endpoint
+router.post('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        error: 'Missing token',
+        message: 'Verification token is required.'
+      });
+    }
+
+    const user = await User.findOne({
+      where: {
+        email_verification_token: token,
+        email_verification_expires: {
+          [Op.gt]: new Date()
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        error: 'Invalid or expired token',
+        message: 'Email verification token is invalid or has expired.'
+      });
+    }
+
+    // Verify email
+    user.is_verified = true;
+    user.email_verification_token = null;
+    user.email_verification_expires = null;
+    await user.save();
+
+    // Log email verification
+    await AuditLog.create({
+      action: 'email_verified',
+      resource_type: 'user',
+      resource_id: user.id,
+      user_id: user.id,
+      details: { 
+        email: user.email
+      },
+      ip_address: req.ip,
+      user_agent: req.get('User-Agent')
+    });
+
+    res.json({
+      message: 'Email verification successful.',
+      user: {
+        id: user.id,
+        email: user.email,
+        isVerified: user.is_verified
+      }
+    });
+
+  } catch (error) {
+    console.error('Email verification error:', error);
+    res.status(500).json({
+      error: 'Email verification failed',
+      message: 'An error occurred during email verification. Please try again.'
     });
   }
 });

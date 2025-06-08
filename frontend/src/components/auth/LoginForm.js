@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import './LoginForm.css';
 
@@ -7,7 +8,10 @@ const LoginForm = ({ onSwitchToRegister }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPasswordResetModal, setShowPasswordResetModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
   const { login } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -22,11 +26,25 @@ const LoginForm = ({ onSwitchToRegister }) => {
 
     const result = await login(email, password);
     
+    console.log('Login result:', result); // Debug log
+    
     if (!result.success) {
-      setError(result.error);
+      if (result.passwordResetRequired) {
+        // Show password reset modal
+        console.log('Showing password reset modal for:', result.email); // Debug log
+        setResetEmail(result.email);
+        setShowPasswordResetModal(true);
+      } else {
+        setError(result.error);
+      }
     }
     
     setLoading(false);
+  };
+
+  const handlePasswordResetRedirect = () => {
+    setShowPasswordResetModal(false);
+    navigate('/password-reset', { state: { email: resetEmail } });
   };
 
   return (
@@ -79,6 +97,11 @@ const LoginForm = ({ onSwitchToRegister }) => {
 
         <div className="form-footer">
           <p>
+            <Link to="/password-reset" className="link-btn forgot-password">
+              Forgot your password?
+            </Link>
+          </p>
+          <p>
             Don't have an account?{' '}
             <button 
               type="button" 
@@ -96,6 +119,38 @@ const LoginForm = ({ onSwitchToRegister }) => {
           <p>User: test@tykbasic.local / test123!</p>
         </div>
       </div>
+
+      {/* Password Reset Required Modal */}
+      {showPasswordResetModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>Password Reset Required</h3>
+            </div>
+            <div className="modal-body">
+              <p>Your administrator has required you to reset your password before you can log in.</p>
+              <p>Please use the password reset process to create a new password.</p>
+              <div className="modal-email">
+                <strong>Email:</strong> {resetEmail}
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button 
+                className="btn btn-primary"
+                onClick={handlePasswordResetRedirect}
+              >
+                Reset Password
+              </button>
+              <button 
+                className="btn btn-secondary"
+                onClick={() => setShowPasswordResetModal(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

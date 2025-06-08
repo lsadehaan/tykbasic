@@ -64,12 +64,25 @@ export const AuthProvider = ({ children }) => {
 
       const data = await response.json();
 
-      if (response.ok) {
+      console.log('Login response:', { status: response.status, data }); // Debug log
+
+      // Check for password reset required first (before response.ok check)
+      if (response.status === 202 && data.action === 'password_reset_required') {
+        // Password reset required
+        console.log('Password reset required detected'); // Debug log
+        return { 
+          success: false, 
+          passwordResetRequired: true,
+          email: data.email,
+          error: data.message || 'Password reset required'
+        };
+      } else if (response.ok) {
         localStorage.setItem('token', data.token);
         setToken(data.token);
         setUser(data.user);
         return { success: true, user: data.user };
       } else {
+        console.log('Login failed with status:', response.status, 'data:', data); // Debug log
         return { success: false, error: data.message || 'Login failed' };
       }
     } catch (error) {

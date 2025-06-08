@@ -114,6 +114,19 @@ async function startServer() {
       appLogger.info('Database synchronized successfully.');
     }
     
+    // Initialize email service
+    try {
+      const emailService = require('./services/emailService');
+      const emailConfigured = await emailService.loadConfig();
+      if (emailConfigured) {
+        appLogger.info('✅ Email service initialized successfully');
+      } else {
+        appLogger.info('⚠️  Email service not configured - emails will not be sent');
+      }
+    } catch (emailError) {
+      appLogger.error('❌ Email service initialization failed:', emailError.message);
+    }
+    
     // Start server
     app.listen(PORT, () => {
       appLogger.info(`TykBasic backend server running on port ${PORT}`);

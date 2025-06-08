@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import KeyCreationModal from './KeyCreationModal';
 import KeySuccessModal from './KeySuccessModal';
@@ -443,6 +444,11 @@ const Dashboard = () => {
             >
               🔑 API Keys
             </button>
+            {user && ['super_admin', 'admin'].includes(user.role) && (
+              <Link to="/admin" className="nav-btn admin-link">
+                ⚙️ Admin
+              </Link>
+            )}
           </nav>
           <div className="user-info">
             <span className="welcome-text">

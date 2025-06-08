@@ -951,6 +951,7 @@ class AdminService {
     const pendingUser = await db.pending_users.findById(pendingUserId);
     
     // Create actual user
+    // IMPORTANT: Bypass password hashing hooks since pendingUser.password_hash is already hashed
     const user = await db.users.create({
       email: pendingUser.email,
       password_hash: pendingUser.password_hash,
@@ -960,6 +961,8 @@ class AdminService {
       is_approved: true,
       approved_by: adminUserId,
       approved_at: new Date()
+    }, {
+      hooks: false // Critical: Prevent double-hashing of already hashed password
     });
     
     // Remove from pending
@@ -1280,4 +1283,55 @@ rm API_CAPABILITIES_SUMMARY.md
 rm API_AVAILABILITY_REPORT.md
 ```
 
-The remaining files provide essential API documentation, configuration examples, and utility functions that will be valuable for your frontend implementation. 
+The remaining files provide essential API documentation, configuration examples, and utility functions that will be valuable for your frontend implementation.
+
+## Troubleshooting & Maintenance
+
+### Password Double-Hashing Bug Fix
+
+A critical bug was identified in the user approval process where passwords were being double-hashed, preventing users from logging in with their originally set passwords.
+
+#### Problem
+1. User registration correctly hashes passwords and stores them in `pending_users.password_hash`
+2. User approval transfers the already-hashed password to the `users` table
+3. The User model's `beforeCreate` hook attempts to hash it again
+4. Result: Double-hashed passwords that never match the original password
+
+#### Solution Applied
+Updated the user approval process to bypass password hashing hooks:
+
+```javascript
+// CORRECT: Bypass hooks to prevent double-hashing
+const user = await User.create({
+  email: pendingUser.email,
+  password: pendingUser.password_hash, // Already hashed
+  // ... other fields
+}, {
+  hooks: false // Critical: Prevent double-hashing
+});
+```
+
+#### Recovery Tools
+If users experience login issues after approval, use the recovery script:
+
+```bash
+# Scan for affected users
+cd backend
+node scripts/fix-double-hashed-passwords.js scan
+
+# Fix specific user
+node scripts/fix-double-hashed-passwords.js fix-user user@example.com
+
+# Fix all affected users  
+node scripts/fix-double-hashed-passwords.js fix
+```
+
+The script sets a temporary password (`TempPass123!`) that users can use to login and reset their password.
+
+#### Prevention
+This fix ensures all future user approvals work correctly. The bug is permanently resolved by:
+1. Adding `hooks: false` to bypass password hashing during user approval
+2. Comprehensive audit logging for all password operations
+3. Recovery tools for any affected users
+
+For more details, see `PASSWORD_FIX_DOCUMENTATION.md`. 
