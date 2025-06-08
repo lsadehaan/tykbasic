@@ -49,6 +49,47 @@ const checkEmailWhitelist = async (email) => {
   });
 };
 
+// Helper function to validate password strength
+const validatePasswordStrength = (password) => {
+  const checks = {
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number: /\d/.test(password),
+    special: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)
+  };
+
+  const feedback = [];
+  let score = 0;
+
+  if (!checks.length) feedback.push('Must be at least 8 characters long');
+  else score += 1;
+
+  if (!checks.uppercase) feedback.push('Must contain at least one uppercase letter');
+  else score += 1;
+
+  if (!checks.lowercase) feedback.push('Must contain at least one lowercase letter');
+  else score += 1;
+
+  if (!checks.number) feedback.push('Must contain at least one number');
+  else score += 1;
+
+  if (!checks.special) feedback.push('Must contain at least one special character');
+  else score += 1;
+
+  const isValid = score >= 4; // Must meet first 4 basic requirements
+
+  return {
+    score,
+    feedback,
+    isValid,
+    strength: score < 2 ? 'Very Weak' : 
+              score < 4 ? 'Weak' : 
+              score < 5 ? 'Good' : 
+              score < 6 ? 'Strong' : 'Very Strong'
+  };
+};
+
 // Health check for auth routes
 router.get('/health', (req, res) => {
   res.json({ 
@@ -95,11 +136,21 @@ router.post('/register', authLimiter, async (req, res) => {
       });
     }
 
-    // Password strength validation
-    if (password.length < 8) {
+    // Enhanced password strength validation
+    const passwordValidation = validatePasswordStrength(password);
+    console.log(`🔐 [${requestId}] Password validation result:`, {
+      password: password.substring(0, 3) + '***', // Don't log full password
+      score: passwordValidation.score,
+      isValid: passwordValidation.isValid,
+      feedback: passwordValidation.feedback
+    });
+    
+    if (!passwordValidation.isValid) {
+      console.log(`❌ [${requestId}] Password rejected:`, passwordValidation.feedback);
       return res.status(400).json({
         error: 'Weak password',
-        message: 'Password must be at least 8 characters long.'
+        message: 'Password does not meet security requirements.',
+        details: passwordValidation.feedback
       });
     }
 
@@ -692,11 +743,13 @@ router.post('/password-reset/confirm', authLimiter, async (req, res) => {
       });
     }
 
-    // Password strength validation
-    if (password.length < 8) {
+    // Enhanced password strength validation
+    const passwordValidation = validatePasswordStrength(password);
+    if (!passwordValidation.isValid) {
       return res.status(400).json({
         error: 'Weak password',
-        message: 'Password must be at least 8 characters long.'
+        message: 'Password does not meet security requirements.',
+        details: passwordValidation.feedback
       });
     }
 

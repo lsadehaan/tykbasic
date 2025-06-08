@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import LoginForm from './components/auth/LoginForm';
 import RegisterForm from './components/auth/RegisterForm';
+import EmailVerification from './components/auth/EmailVerification';
 import PasswordReset from './components/PasswordReset';
 import Dashboard from './components/dashboard/Dashboard';
 import AdminDashboard from './components/AdminDashboard';
@@ -104,6 +105,14 @@ function AppContent() {
         element={
           <PublicRoute>
             <PasswordReset />
+          </PublicRoute>
+        } 
+      />
+      <Route 
+        path="/verify-email" 
+        element={
+          <PublicRoute>
+            <EmailVerification />
           </PublicRoute>
         } 
       />

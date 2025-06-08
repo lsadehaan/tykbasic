@@ -4,6 +4,7 @@
   "description": "TykBasic - A streamlined frontend application for managing Tyk Gateway APIs, organizations, users, and authentication methods",
   "main": "backend/server.js",
   "scripts": {
+    "start": "npm run dev",
     "dev": "concurrently \"npm run backend:dev\" \"npm run frontend:dev\"",
     "backend:dev": "nodemon backend/server.js",
     "frontend:dev": "cd frontend && npm run dev",
