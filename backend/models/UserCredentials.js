@@ -39,15 +39,10 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true
     },
     // Tyk Gateway information
-    tyk_key_id: {
-      type: DataTypes.STRING,
-      allowNull: true,
-      comment: 'Key ID in Tyk Gateway'
-    },
     tyk_key_hash: {
       type: DataTypes.STRING,
       allowNull: true,
-      comment: 'Hashed key for Tyk API operations'
+      comment: 'Hashed key for Tyk API operations (key_hash from Tyk response)'
     },
     // API Key configuration
     api_key_data: {
@@ -203,7 +198,7 @@ module.exports = (sequelize, DataTypes) => {
       credential_type: this.credential_type,
       name: this.name,
       description: this.description,
-      tyk_key_id: this.tyk_key_id,
+      key_hash: this.tyk_key_hash, // Use key_hash for frontend consistency
       certificate_id: this.certificate_id,
       certificate_fingerprint: this.certificate_fingerprint,
       certificate_expires_at: this.certificate_expires_at,
@@ -237,8 +232,8 @@ module.exports = (sequelize, DataTypes) => {
     });
   };
 
-  UserCredentials.findByTykKeyId = function(tykKeyId) {
-    return this.findOne({ where: { tyk_key_id: tykKeyId } });
+  UserCredentials.findByTykKeyHash = function(tykKeyHash) {
+    return this.findOne({ where: { tyk_key_hash: tykKeyHash } });
   };
 
   UserCredentials.findByCertificateId = function(certificateId) {

@@ -1,0 +1,280 @@
+.key-success-modal {
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.key-success-content {
+  padding: 0 24px 24px 24px;
+}
+
+.success-message {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.success-message p {
+  margin: 0;
+  font-weight: 500;
+  font-size: 1.1rem;
+}
+
+.key-details {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.detail-section {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.detail-section h3 {
+  margin: 0 0 16px 0;
+  color: #1f2937;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 8px;
+}
+
+.detail-section h4 {
+  margin: 16px 0 8px 0;
+  color: #374151;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.copy-field {
+  margin-bottom: 16px;
+}
+
+.copy-field:last-child {
+  margin-bottom: 0;
+}
+
+.copy-field label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 500;
+  color: #374151;
+  font-size: 0.875rem;
+}
+
+.copy-input-group {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.copy-input, .copy-textarea {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  background-color: #ffffff;
+  color: #1f2937;
+  resize: none;
+}
+
+.copy-input:focus, .copy-textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.copy-btn {
+  padding: 10px 16px;
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  min-width: 100px;
+}
+
+.copy-btn:hover {
+  background-color: #2563eb;
+}
+
+.copy-btn:active {
+  transform: translateY(1px);
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 12px;
+}
+
+.config-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.config-label {
+  font-weight: 500;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.config-value {
+  font-weight: 600;
+  color: #1f2937;
+  font-size: 0.875rem;
+}
+
+.status-active {
+  color: #059669 !important;
+  text-transform: uppercase;
+}
+
+.api-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.api-access-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.api-name {
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.api-path {
+  font-size: 0.75rem;
+  color: #6b7280;
+  background-color: #f3f4f6;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.example-section {
+  margin-bottom: 16px;
+}
+
+.example-section:last-child {
+  margin-bottom: 0;
+}
+
+.important-note {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 8px;
+}
+
+.important-note h4 {
+  margin: 0 0 12px 0;
+  color: #92400e;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.important-note ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #92400e;
+}
+
+.important-note li {
+  margin-bottom: 6px;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.important-note li:last-child {
+  margin-bottom: 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn.primary {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: white;
+}
+
+.btn.primary:hover {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .key-success-modal {
+    max-width: 95vw;
+    max-height: 95vh;
+  }
+  
+  .key-success-content {
+    padding: 0 16px 16px 16px;
+  }
+  
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .copy-input-group {
+    flex-direction: column;
+  }
+  
+  .copy-btn {
+    align-self: flex-start;
+  }
+  
+  .api-access-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .detail-section {
+    padding: 16px;
+  }
+} 
