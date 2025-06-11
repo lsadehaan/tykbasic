@@ -4,8 +4,8 @@ A streamlined frontend application for managing Tyk Gateway APIs, organizations,
 
 ## 📈 Current Status
 
-**Version**: 1.0.0-beta  
-**Status**: ✅ **Production Ready**  
+**Version**: 0.5.0-alpa  
+**Status**: ✅ **alpha**  
 **Last Updated**: Current Session
 
 ### ✅ Completed Features
