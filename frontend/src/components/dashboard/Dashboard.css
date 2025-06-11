@@ -7,6 +7,9 @@
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   color: white;
+  position: relative;
+  z-index: 100;
+  min-height: 70px;
 }
 
 .header-content {
@@ -18,6 +21,8 @@
   padding: 0 20px;
   height: 70px;
   gap: 30px;
+  position: relative;
+  z-index: 101;
 }
 
 .main-navigation {
@@ -58,15 +63,20 @@
   font-weight: 600;
 }
 
-.user-info {
+.dashboard-header .user-info {
   display: flex;
   align-items: center;
   gap: 20px;
+  color: white !important;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
 }
 
-.welcome-text {
+.dashboard-header .welcome-text {
   font-size: 16px;
   font-weight: 500;
+  color: white !important;
 }
 
 .user-menu {
@@ -75,28 +85,32 @@
   gap: 12px;
 }
 
-.user-role {
+.dashboard-header .user-role {
   background: rgba(255, 255, 255, 0.2);
   padding: 4px 12px;
   border-radius: 20px;
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 500;
+  color: white !important;
 }
 
-.logout-btn {
+.dashboard-header .logout-btn {
   background: rgba(255, 255, 255, 0.2);
-  color: white;
+  color: white !important;
   border: 1px solid rgba(255, 255, 255, 0.3);
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
-  transition: background 0.2s ease;
+  font-weight: 500;
+  transition: all 0.2s ease;
 }
 
-.logout-btn:hover {
+.dashboard-header .logout-btn:hover {
   background: rgba(255, 255, 255, 0.3);
+  color: white !important;
+  transform: translateY(-1px);
 }
 
 .dashboard-main {
@@ -200,16 +214,26 @@
   color: #d97706;
 }
 
+/* Action buttons layout - Updated for multi-row layout */
+.dashboard .card-content .action-buttons {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 12px !important;
+  /* Force multi-row layout for 5 buttons - 2 columns means 2-2-1 layout */
+}
+
 .action-buttons {
   display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 12px;
+  /* Force multi-row layout for 5 buttons */
 }
 
 .action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 14px 20px;
+  padding: 14px 16px;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 500;
@@ -217,6 +241,10 @@
   transition: all 0.2s ease;
   border: none;
   text-decoration: none;
+  min-height: 48px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .action-btn.primary {
@@ -324,10 +352,25 @@
     gap: 10px;
   }
 
-  .user-info {
+  .dashboard-header .user-info {
     flex-direction: column;
     gap: 10px;
     align-items: center;
+    color: white !important; /* Ensure white text in responsive mode */
+    background: transparent !important;
+  }
+
+  .dashboard-header .welcome-text {
+    color: white !important; /* Ensure visible text */
+    text-align: center;
+  }
+
+  .dashboard-header .user-role {
+    color: white !important; /* Ensure visible text */
+  }
+
+  .dashboard-header .logout-btn {
+    color: white !important; /* Ensure visible text */
   }
 
   .dashboard-grid {
@@ -374,12 +417,7 @@
   background-color: rgba(220, 38, 38, 0.1);
 }
 
-/* Action Buttons Enhancements */
-.action-buttons {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
+/* Action Buttons Enhancements - Removed duplicate rule */
 
 .action-btn:disabled {
   opacity: 0.6;
@@ -458,9 +496,9 @@
 /* Statistics Grid */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  padding: 4px 0;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 20px;
+  padding: 8px 0;
 }
 
 .stat-item {
@@ -498,7 +536,7 @@
   letter-spacing: 0.5px;
 }
 
-/* Responsive Design for Statistics */
+/* Responsive Design for Statistics and Actions */
 @media (max-width: 768px) {
   .stats-grid {
     grid-template-columns: 1fr;
@@ -507,10 +545,24 @@
   
   .action-buttons {
     grid-template-columns: 1fr;
+    max-width: none;
+    gap: 10px;
   }
   
   .stat-number {
     font-size: 24px;
+  }
+}
+
+/* Medium screens - tablet responsive */
+@media (max-width: 1024px) and (min-width: 769px) {
+  .action-buttons {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    max-width: 380px;
+  }
+  
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   }
 }
 
@@ -540,4 +592,23 @@
 .activity-text {
   font-size: 14px;
   color: #374151;
-} 
+}
+
+/* Ensure the admin link has proper styling too */
+.nav-btn.admin-link {
+  text-decoration: none;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.nav-btn.admin-link:hover {
+  color: white;
+}
+
+/* IMPORTANT: Force action buttons to use 2-column layout */
+.dashboard .action-buttons {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 12px !important;
+  width: 100% !important;
+  max-width: none !important;
+}

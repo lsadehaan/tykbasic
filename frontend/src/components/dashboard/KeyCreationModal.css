@@ -310,4 +310,135 @@
   .advanced-subsection {
     padding: 12px;
   }
+}
+
+/* Policy Selection Styles */
+.policy-selection {
+  margin-top: 1rem;
+}
+
+.no-policies {
+  text-align: center;
+  padding: 2rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 2px dashed #dee2e6;
+  margin: 1rem 0;
+}
+
+.no-policies p {
+  margin: 0.5rem 0;
+  color: #6c757d;
+}
+
+.no-policies p:first-child {
+  font-weight: 600;
+  color: #495057;
+}
+
+/* Policy Details */
+.policy-details {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+}
+
+.policy-details h4 {
+  margin: 0 0 1rem 0;
+  color: #495057;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.policy-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.policy-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.policy-info-row .label {
+  font-weight: 600;
+  color: #495057;
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.policy-info-row .value {
+  color: #212529;
+  text-align: right;
+  flex: 1;
+}
+
+/* Info Box */
+.info-box {
+  background: #e3f2fd;
+  border: 1px solid #bbdefb;
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.info-box p {
+  margin: 0.5rem 0;
+  color: #1565c0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.info-box p:first-child {
+  margin-top: 0;
+}
+
+.info-box p:last-child {
+  margin-bottom: 0;
+}
+
+/* Select styling improvements */
+select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 1rem;
+  background: white;
+  cursor: pointer;
+}
+
+select:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+select option {
+  padding: 0.5rem;
+}
+
+/* Advanced settings adjustments */
+.advanced-subsection {
+  margin-bottom: 1.5rem;
+}
+
+.advanced-subsection:last-child {
+  margin-bottom: 0;
+}
+
+/* Policy-specific button styling */
+.form-actions button.primary:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-actions button.primary:disabled:hover {
+  background: #6c757d;
+  transform: none;
 } 

@@ -172,9 +172,17 @@ router.post('/register', authLimiter, async (req, res) => {
       });
     }
 
-    // Find or create default organization
+    // Find organization by email domain or use specified/default organization
     let organization;
-    if (organizationName) {
+    
+    // First, try to find organization by email domain (auto-assignment)
+    const autoAssignOrg = await Organization.findByEmailDomain(email);
+    
+    if (autoAssignOrg) {
+      organization = autoAssignOrg;
+      console.log(`🎯 Auto-assigning user ${email} to organization ${organization.name} based on domain`);
+    } else if (organizationName) {
+      // Use specified organization name
       organization = await Organization.findOne({ 
         where: { name: organizationName } 
       });
@@ -183,10 +191,11 @@ router.post('/register', authLimiter, async (req, res) => {
           name: organizationName,
           display_name: organizationName,
           description: `Organization for ${organizationName}`,
-          status: 'active'
+          is_active: true
         });
       }
     } else {
+      // Fall back to default organization
       organization = await Organization.findOne({ 
         where: { name: 'default' } 
       });
@@ -195,7 +204,7 @@ router.post('/register', authLimiter, async (req, res) => {
           name: 'default',
           display_name: 'Default Organization',
           description: 'Default organization for TykBasic users',
-          status: 'active'
+          is_active: true
         });
       }
     }

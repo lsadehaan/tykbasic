@@ -5,31 +5,26 @@ const KeyCreationModal = ({ isOpen, onClose, onKeyCreated }) => {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    org_id: 'default',
-    rate: 1000,
-    per: 60,
-    allowance: 1000,
-    quota_max: '',
-    quota_renewal_rate: 3600,
+    policy_id: '',
     expires: '' // Optional expiration
   });
   
-  const [apis, setApis] = useState([]);
-  const [selectedApis, setSelectedApis] = useState([]);
+  const [policies, setPolicies] = useState([]);
+  const [selectedPolicy, setSelectedPolicy] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
-      loadApis();
+      loadPolicies();
     }
   }, [isOpen]);
 
-  const loadApis = async () => {
+  const loadPolicies = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/tyk/apis', {
+      const response = await fetch('/api/policies/available', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -38,13 +33,16 @@ const KeyCreationModal = ({ isOpen, onClose, onKeyCreated }) => {
 
       if (response.ok) {
         const data = await response.json();
-        const apiList = data.data || [];
-        setApis(apiList);
-        console.log('📋 Loaded APIs for key creation:', apiList.length);
+        const policyList = data.data || [];
+        setPolicies(policyList);
+        console.log('📋 Loaded available policies for key creation:', policyList.length);
+      } else {
+        console.error('Failed to load policies:', response.statusText);
+        setError('Failed to load available policies');
       }
     } catch (error) {
-      console.error('Failed to load APIs:', error);
-      setError('Failed to load APIs');
+      console.error('Failed to load policies:', error);
+      setError('Failed to load policies');
     }
   };
 
@@ -54,13 +52,11 @@ const KeyCreationModal = ({ isOpen, onClose, onKeyCreated }) => {
       ...prev,
       [name]: value
     }));
-  };
 
-  const handleApiSelection = (api, isSelected) => {
-    if (isSelected) {
-      setSelectedApis(prev => [...prev, api]);
-    } else {
-      setSelectedApis(prev => prev.filter(a => a.api_id !== api.api_id));
+    // When policy is selected, store the policy object for display
+    if (name === 'policy_id') {
+      const policy = policies.find(p => p.id === parseInt(value));
+      setSelectedPolicy(policy);
     }
   };
 
@@ -70,44 +66,24 @@ const KeyCreationModal = ({ isOpen, onClose, onKeyCreated }) => {
     setError(null);
 
     try {
-      // Validation: require at least one API to be selected
-      if (selectedApis.length === 0) {
-        setError('Please select at least one API to grant access to.');
+      // Validation: require policy selection
+      if (!formData.policy_id) {
+        setError('Please select a policy for this key.');
         return;
       }
-
-      // Build access rights from selected APIs
-      const accessRights = {};
-      selectedApis.forEach(api => {
-        accessRights[api.api_id] = {
-          api_id: api.api_id,
-          api_name: api.name,
-          versions: ["Default"]
-        };
-      });
 
       const keyData = {
         name: formData.name,
         description: formData.description,
-        org_id: formData.org_id,
-        allowance: parseInt(formData.allowance),
-        rate: parseInt(formData.rate),
-        per: parseInt(formData.per),
-        access_rights: accessRights
+        policy_id: parseInt(formData.policy_id)
       };
-
-      // Add quota settings if provided
-      if (formData.quota_max && parseInt(formData.quota_max) > 0) {
-        keyData.quota_max = parseInt(formData.quota_max);
-        keyData.quota_renewal_rate = parseInt(formData.quota_renewal_rate) || 3600;
-      }
 
       // Add expiration if specified
       if (formData.expires) {
         keyData.expires = new Date(formData.expires).getTime() / 1000;
       }
 
-      console.log('🔑 Creating key with data:', keyData);
+      console.log('🔑 Creating policy-based key with data:', keyData);
 
       const token = localStorage.getItem('token');
       const response = await fetch('/api/tyk/keys', {
@@ -121,9 +97,9 @@ const KeyCreationModal = ({ isOpen, onClose, onKeyCreated }) => {
 
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ Key created:', result);
+        console.log('✅ Policy-based key created:', result);
         
-        onKeyCreated(result.data, formData, selectedApis);
+        onKeyCreated(result.data, formData, selectedPolicy);
         handleClose();
       } else {
         const errorData = await response.json().catch(() => ({}));
@@ -141,15 +117,10 @@ const KeyCreationModal = ({ isOpen, onClose, onKeyCreated }) => {
     setFormData({
       name: '',
       description: '',
-      org_id: 'default',
-      rate: 1000,
-      per: 60,
-      allowance: 1000,
-      quota_max: '',
-      quota_renewal_rate: 3600,
+      policy_id: '',
       expires: ''
     });
-    setSelectedApis([]);
+    setSelectedPolicy(null);
     setShowAdvanced(false);
     setError(null);
     onClose();
@@ -202,26 +173,70 @@ const KeyCreationModal = ({ isOpen, onClose, onKeyCreated }) => {
             </div>
           </div>
 
-          {/* API Selection */}
+          {/* Policy Selection */}
           <div className="form-section">
-            <h3>API Access</h3>
-            <div className="api-selection">
-              {apis.length === 0 ? (
-                <p className="no-apis">No APIs available. Create an API first!</p>
+            <h3>Access Policy</h3>
+            <div className="policy-selection">
+              {policies.length === 0 ? (
+                <div className="no-policies">
+                  <p>📝 No policies are available for your organization.</p>
+                  <p>Contact your administrator to create access policies.</p>
+                </div>
               ) : (
-                apis.map(api => (
-                  <div key={api.api_id} className="api-item">
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={selectedApis.some(a => a.api_id === api.api_id)}
-                        onChange={(e) => handleApiSelection(api, e.target.checked)}
-                      />
-                      <span className="api-name">{api.name}</span>
-                      <span className="api-path">{api.proxy?.listen_path}</span>
-                    </label>
+                <div className="form-group">
+                  <label htmlFor="policy_id">Select Policy *</label>
+                  <select
+                    id="policy_id"
+                    name="policy_id"
+                    value={formData.policy_id}
+                    onChange={handleInputChange}
+                    required
+                  >
+                    <option value="">Choose a policy...</option>
+                    {policies.map(policy => (
+                      <option key={policy.id} value={policy.id}>
+                        {policy.name} ({policy.api_count} APIs)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Policy Details */}
+              {selectedPolicy && (
+                <div className="policy-details">
+                  <h4>Policy Details</h4>
+                  <div className="policy-info">
+                    <div className="policy-info-row">
+                      <span className="label">Name:</span>
+                      <span className="value">{selectedPolicy.name}</span>
+                    </div>
+                    {selectedPolicy.description && (
+                      <div className="policy-info-row">
+                        <span className="label">Description:</span>
+                        <span className="value">{selectedPolicy.description}</span>
+                      </div>
+                    )}
+                    <div className="policy-info-row">
+                      <span className="label">API Access:</span>
+                      <span className="value">{selectedPolicy.api_count} API(s)</span>
+                    </div>
+                    <div className="policy-info-row">
+                      <span className="label">Rate Limit:</span>
+                      <span className="value">
+                        {selectedPolicy.rate_limit} requests per {selectedPolicy.rate_per} seconds
+                      </span>
+                    </div>
+                    {selectedPolicy.quota_max > 0 && (
+                      <div className="policy-info-row">
+                        <span className="label">Quota:</span>
+                        <span className="value">
+                          {selectedPolicy.quota_max} requests per {Math.floor(selectedPolicy.quota_renewal_rate / 3600)} hour(s)
+                        </span>
+                      </div>
+                    )}
                   </div>
-                ))
+                </div>
               )}
             </div>
           </div>
@@ -235,84 +250,9 @@ const KeyCreationModal = ({ isOpen, onClose, onKeyCreated }) => {
             
             {showAdvanced && (
               <div className="advanced-content">
-                {/* Rate Limiting */}
-                <div className="advanced-subsection">
-                  <h4>Rate Limiting</h4>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label htmlFor="rate">Rate Limit (requests)</label>
-                      <input
-                        type="number"
-                        id="rate"
-                        name="rate"
-                        value={formData.rate}
-                        onChange={handleInputChange}
-                        min="1"
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label htmlFor="per">Per (seconds)</label>
-                      <input
-                        type="number"
-                        id="per"
-                        name="per"
-                        value={formData.per}
-                        onChange={handleInputChange}
-                        min="1"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-group">
-                    <label htmlFor="allowance">Allowance (burst capacity)</label>
-                    <input
-                      type="number"
-                      id="allowance"
-                      name="allowance"
-                      value={formData.allowance}
-                      onChange={handleInputChange}
-                      min="1"
-                      required
-                    />
-                    <small>Number of requests that can be made in a burst</small>
-                  </div>
-                </div>
-
-                {/* Quota Settings */}
-                <div className="advanced-subsection">
-                  <h4>Quota Settings</h4>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label htmlFor="quota_max">Max Requests</label>
-                      <input
-                        type="number"
-                        id="quota_max"
-                        name="quota_max"
-                        value={formData.quota_max}
-                        onChange={handleInputChange}
-                        min="0"
-                        placeholder="Leave empty for unlimited"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label htmlFor="quota_renewal_rate">Renewal Period (seconds)</label>
-                      <input
-                        type="number"
-                        id="quota_renewal_rate"
-                        name="quota_renewal_rate"
-                        value={formData.quota_renewal_rate}
-                        onChange={handleInputChange}
-                        min="1"
-                      />
-                    </div>
-                  </div>
-                </div>
-
                 {/* Expiration */}
                 <div className="advanced-subsection">
-                  <h4>Expiration</h4>
+                  <h4>Key Expiration</h4>
                   <div className="form-group">
                     <label htmlFor="expires">Expires At</label>
                     <input
@@ -325,6 +265,16 @@ const KeyCreationModal = ({ isOpen, onClose, onKeyCreated }) => {
                     <small>Leave empty for no expiration</small>
                   </div>
                 </div>
+
+                {/* Policy Information */}
+                <div className="advanced-subsection">
+                  <h4>About Policy-Based Keys</h4>
+                  <div className="info-box">
+                    <p>🔒 Policy-based keys inherit their access rights and rate limits from the selected policy.</p>
+                    <p>📋 Policies are managed by administrators and define which APIs can be accessed and at what rates.</p>
+                    <p>🔧 Contact your administrator if you need access to additional APIs or different rate limits.</p>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -335,7 +285,7 @@ const KeyCreationModal = ({ isOpen, onClose, onKeyCreated }) => {
             </button>
             <button 
               type="submit" 
-              disabled={loading || selectedApis.length === 0}
+              disabled={loading || !formData.policy_id}
               className="primary"
             >
               {loading ? 'Creating Key...' : '🔑 Create Key'}

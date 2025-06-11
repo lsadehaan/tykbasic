@@ -261,10 +261,116 @@ const optionalAuth = async (req, res, next) => {
   next();
 };
 
+// Organization access control middleware
+function requireValidOrganization(req, res, next) {
+  try {
+    const user = req.user;
+    
+    // Super admins and admins can access all organizations
+    if (user.role === 'super_admin' || user.role === 'admin') {
+      return next();
+    }
+    
+    // Check if user has an organization assigned
+    if (!user.organization_id || !user.organization) {
+      console.log(`🚫 User ${user.email} denied access: No organization assigned`);
+      return res.status(403).json({
+        error: 'No organization assigned',
+        message: 'Your account is not assigned to any organization. Please contact an administrator to assign you to an organization.',
+        code: 'NO_ORGANIZATION_ASSIGNED',
+        requiresOrganization: true
+      });
+    }
+    
+    // Check if user is assigned to "default" organization (security risk for non-admins)
+    if (user.organization.name === 'default') {
+      console.log(`🚫 User ${user.email} denied access: Assigned to default organization`);
+      return res.status(403).json({
+        error: 'Invalid organization assignment',
+        message: 'Your account is assigned to the default organization, which is not permitted for regular users. Please contact an administrator to assign you to a proper organization.',
+        code: 'DEFAULT_ORGANIZATION_NOT_ALLOWED',
+        requiresOrganization: true
+      });
+    }
+    
+    // Check if organization is active
+    if (!user.organization.is_active) {
+      console.log(`🚫 User ${user.email} denied access: Organization inactive`);
+      return res.status(403).json({
+        error: 'Organization inactive',
+        message: 'Your organization is currently inactive. Please contact an administrator.',
+        code: 'ORGANIZATION_INACTIVE',
+        organizationName: user.organization.name
+      });
+    }
+    
+    // Check if organization has Tyk integration
+    if (!user.organization.tyk_org_id) {
+      console.log(`🚫 User ${user.email} denied access: Organization missing Tyk integration`);
+      return res.status(500).json({
+        error: 'Organization not properly configured',
+        message: 'Your organization is not properly configured for API management. Please contact an administrator.',
+        code: 'ORGANIZATION_NOT_CONFIGURED'
+      });
+    }
+    
+    console.log(`✅ User ${user.email} organization access granted:`, {
+      organizationName: user.organization.name,
+      tykOrgId: user.organization.tyk_org_id
+    });
+    
+    next();
+  } catch (error) {
+    console.error('Organization access control error:', error);
+    res.status(500).json({
+      error: 'Organization access check failed',
+      message: 'An error occurred while checking organization access.'
+    });
+  }
+}
+
+// Enhanced organization enforcement for API operations
+function requireOrganizationForApiOperations(req, res, next) {
+  try {
+    const user = req.user;
+    
+    // Super admins can work with any organization context
+    if (user.role === 'super_admin') {
+      return next();
+    }
+    
+    // For non-super-admin users, enforce their organization context
+    requireValidOrganization(req, res, next);
+  } catch (error) {
+    console.error('API organization enforcement error:', error);
+    res.status(500).json({
+      error: 'Organization enforcement failed',
+      message: 'An error occurred while enforcing organization context.'
+    });
+  }
+}
+
+// Helper function to get user's Tyk organization context
+function getUserTykContext(user) {
+  if (!user.organization || !user.organization.tyk_org_id) {
+    throw new Error('User does not have valid Tyk organization context');
+  }
+  
+  return {
+    orgId: user.organization.tyk_org_id,
+    orgKey: user.organization.tyk_org_key,
+    organizationName: user.organization.name,
+    rateLimits: user.organization.default_rate_limits || {}
+  };
+}
+
 module.exports = {
   authenticateToken,
   requireRole,
   requireAdmin,
   requireSameOrgOrAdmin,
-  optionalAuth
+  optionalAuth,
+  requireValidOrganization,
+  requireOrganizationForApiOperations,
+  getUserTykContext
 }; 

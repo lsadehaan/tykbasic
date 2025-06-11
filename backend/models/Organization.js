@@ -30,8 +30,22 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: true,
       validate: {
-        isUrl: true
+        isUrlIfNotEmpty(value) {
+          if (value && value.trim() !== '') {
+            const urlRegex = /^https?:\/\/([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/;
+            if (!urlRegex.test(value)) {
+              throw new Error('Domain must be a valid URL');
+            }
+          }
+        }
       }
+    },
+    // New field for automatic domain-based assignment
+    auto_assign_domains: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: [],
+      comment: 'List of email domains that will automatically assign users to this organization'
     },
     // Organization configuration
     is_active: {
@@ -83,7 +97,14 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: true,
       validate: {
-        isEmail: true
+        isEmailIfNotEmpty(value) {
+          if (value && value.trim() !== '') {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(value)) {
+              throw new Error('Contact email must be a valid email address');
+            }
+          }
+        }
       }
     },
     contact_phone: {
@@ -95,6 +116,12 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.JSON,
       allowNull: true,
       defaultValue: {}
+    },
+    // Policy management permissions
+    allow_admin_policy_creation: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
+      comment: 'Allow organization admins to create policies'
     },
     // Statistics
     user_count: {
@@ -197,6 +224,42 @@ module.exports = (sequelize, DataTypes) => {
 
   Organization.prototype.getDefaultRateLimit = function(type = 'allowance') {
     return this.default_rate_limits?.[type] || 0;
+  };
+
+  // New method to check if an email domain should auto-assign to this organization
+  Organization.prototype.shouldAutoAssignDomain = function(email) {
+    if (!this.auto_assign_domains || !Array.isArray(this.auto_assign_domains)) {
+      return false;
+    }
+    
+    const emailDomain = email.split('@')[1]?.toLowerCase();
+    if (!emailDomain) return false;
+    
+    return this.auto_assign_domains.some(domain => {
+      // Support wildcards like *.company.com
+      if (domain.includes('*')) {
+        const pattern = domain.replace(/\*/g, '.*');
+        const regex = new RegExp(`^${pattern}$`, 'i');
+        return regex.test(emailDomain);
+      }
+      // Exact domain match
+      return domain.toLowerCase() === emailDomain;
+    });
+  };
+
+  // Static method to find organization by email domain
+  Organization.findByEmailDomain = async function(email) {
+    const organizations = await this.findAll({
+      where: { is_active: true }
+    });
+    
+    for (const org of organizations) {
+      if (org.shouldAutoAssignDomain(email)) {
+        return org;
+      }
+    }
+    
+    return null;
   };
 
   Organization.prototype.toSafeObject = function() {

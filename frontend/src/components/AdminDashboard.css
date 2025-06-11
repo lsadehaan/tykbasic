@@ -299,10 +299,21 @@
   color: #c53030;
 }
 
+/* User Actions */
+.user-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.user-actions .btn {
+  white-space: nowrap;
+}
+
 /* Pending Users */
 .pending-users-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
   gap: 20px;
   padding: 24px;
 }
@@ -331,6 +342,31 @@
   margin: 4px 0;
   font-size: 14px;
   color: #718096;
+}
+
+.user-actions {
+  margin-top: 15px;
+}
+
+.approval-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.role-select,
+.org-select {
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: white;
+  font-size: 14px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
 }
 
 .user-actions {
@@ -571,6 +607,13 @@
 .form-group input[type="checkbox"] {
   width: auto;
   margin-right: 8px;
+}
+
+.form-help {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 4px;
+  font-style: italic;
 }
 
 .modal-actions {

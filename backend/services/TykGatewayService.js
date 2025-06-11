@@ -156,12 +156,24 @@ class TykGatewayService {
   }
 
   // API Management
-  async getApis() {
+  async getApis(orgId = null) {
+    // Note: Tyk APIs are not organization-scoped by default, but we can filter by org_id
     const result = await this.makeRequest('GET', '/tyk/apis');
+    
+    if (orgId && result.data && Array.isArray(result.data)) {
+      // Filter APIs by organization ID
+      result.data = result.data.filter(api => api.org_id === orgId);
+    }
+    
     return result.data;
   }
 
-  async createApi(apiDefinition) {
+  async createApi(apiDefinition, orgId = null) {
+    // Ensure organization context is set
+    if (orgId && !apiDefinition.org_id) {
+      apiDefinition.org_id = orgId;
+    }
+    
     const result = await this.makeRequest('POST', '/tyk/apis', apiDefinition);
     return result.data;
   }
@@ -188,25 +200,39 @@ class TykGatewayService {
     return result.data;
   }
 
-  async createKey(keyData) {
+  async createKey(keyData, orgId = null) {
+    // Ensure organization context is set
+    if (orgId && !keyData.org_id) {
+      keyData.org_id = orgId;
+    }
+    
     const result = await this.makeRequest('POST', '/tyk/keys', keyData);
     return result.data;
   }
 
-  async getKey(keyId, hashed = true) {
-    const endpoint = `/tyk/keys/${keyId}?hashed=${hashed}`;
+  async getKey(keyId, hashed = true, orgId = null) {
+    let endpoint = `/tyk/keys/${keyId}?hashed=${hashed}`;
+    if (orgId) {
+      endpoint += `&orgID=${orgId}`;
+    }
     const result = await this.makeRequest('GET', endpoint);
     return result.data;
   }
 
-  async updateKey(keyId, keyData, hashed = true) {
-    const endpoint = `/tyk/keys/${keyId}?hashed=${hashed}`;
+  async updateKey(keyId, keyData, hashed = true, orgId = null) {
+    let endpoint = `/tyk/keys/${keyId}?hashed=${hashed}`;
+    if (orgId) {
+      endpoint += `&orgID=${orgId}`;
+    }
     const result = await this.makeRequest('PUT', endpoint, keyData);
     return result.data;
   }
 
-  async deleteKey(keyId, hashed = true) {
-    const endpoint = `/tyk/keys/${keyId}?hashed=${hashed}`;
+  async deleteKey(keyId, hashed = true, orgId = null) {
+    let endpoint = `/tyk/keys/${keyId}?hashed=${hashed}`;
+    if (orgId) {
+      endpoint += `&orgID=${orgId}`;
+    }
     const result = await this.makeRequest('DELETE', endpoint);
     return result.data;
   }
@@ -237,32 +263,81 @@ class TykGatewayService {
     return result.data;
   }
 
-  // Certificate Management
-  async getCertificates() {
-    const result = await this.makeRequest('GET', '/tyk/certs');
+  // Organization Key Management (for organization-level rate limiting)
+  async getOrganizationKeys(orgId = 'default') {
+    const endpoint = `/tyk/org/keys?orgID=${orgId}`;
+    const result = await this.makeRequest('GET', endpoint);
     return result.data;
   }
 
-  async uploadCertificate(certificatePem) {
-    const result = await this.makeRequest('POST', '/tyk/certs', certificatePem, {
+  async createOrganizationKey(orgId, orgKeyData) {
+    const result = await this.makeRequest('PUT', `/tyk/org/keys/${orgId}`, orgKeyData);
+    return result.data;
+  }
+
+  async getOrganizationKey(orgId) {
+    const endpoint = `/tyk/org/keys/${orgId}?orgID=${orgId}`;
+    const result = await this.makeRequest('GET', endpoint);
+    return result.data;
+  }
+
+  async updateOrganizationKey(orgId, orgKeyData) {
+    const result = await this.makeRequest('PUT', `/tyk/org/keys/${orgId}`, orgKeyData);
+    return result.data;
+  }
+
+  async deleteOrganizationKey(orgId) {
+    const endpoint = `/tyk/org/keys/${orgId}?orgID=${orgId}`;
+    const result = await this.makeRequest('DELETE', endpoint);
+    return result.data;
+  }
+
+  // Certificate Management
+  async getCertificates(orgId = null) {
+    let endpoint = '/tyk/certs';
+    if (orgId) {
+      endpoint += `?org_id=${orgId}`;
+    }
+    const result = await this.makeRequest('GET', endpoint);
+    return result.data;
+  }
+
+  async uploadCertificate(certificatePem, orgId = null) {
+    let endpoint = '/tyk/certs';
+    if (orgId) {
+      endpoint += `?org_id=${orgId}`;
+    }
+    const result = await this.makeRequest('POST', endpoint, certificatePem, {
       contentType: 'text/plain'
     });
     return result.data;
   }
 
-  async getCertificate(certId) {
-    const result = await this.makeRequest('GET', `/tyk/certs/${certId}`);
+  async getCertificate(certId, orgId = null) {
+    let endpoint = `/tyk/certs/${certId}`;
+    if (orgId) {
+      endpoint += `?org_id=${orgId}`;
+    }
+    const result = await this.makeRequest('GET', endpoint);
     return result.data;
   }
 
-  async deleteCertificate(certId) {
-    const result = await this.makeRequest('DELETE', `/tyk/certs/${certId}`);
+  async deleteCertificate(certId, orgId = null) {
+    let endpoint = `/tyk/certs/${certId}`;
+    if (orgId) {
+      endpoint += `?org_id=${orgId}`;
+    }
+    const result = await this.makeRequest('DELETE', endpoint);
     return result.data;
   }
 
   // Policies
-  async getPolicies() {
-    const result = await this.makeRequest('GET', '/tyk/policies');
+  async getPolicies(orgId = null) {
+    let endpoint = '/tyk/policies';
+    if (orgId) {
+      endpoint += `?org_id=${orgId}`;
+    }
+    const result = await this.makeRequest('GET', endpoint);
     return result.data;
   }
 
@@ -271,18 +346,30 @@ class TykGatewayService {
     return result.data;
   }
 
-  async getPolicy(policyId) {
-    const result = await this.makeRequest('GET', `/tyk/policies/${policyId}`);
+  async getPolicy(policyId, orgId = null) {
+    let endpoint = `/tyk/policies/${policyId}`;
+    if (orgId) {
+      endpoint += `?org_id=${orgId}`;
+    }
+    const result = await this.makeRequest('GET', endpoint);
     return result.data;
   }
 
-  async updatePolicy(policyId, policyData) {
-    const result = await this.makeRequest('PUT', `/tyk/policies/${policyId}`, policyData);
+  async updatePolicy(policyId, policyData, orgId = null) {
+    let endpoint = `/tyk/policies/${policyId}`;
+    if (orgId) {
+      endpoint += `?org_id=${orgId}`;
+    }
+    const result = await this.makeRequest('PUT', endpoint, policyData);
     return result.data;
   }
 
-  async deletePolicy(policyId) {
-    const result = await this.makeRequest('DELETE', `/tyk/policies/${policyId}`);
+  async deletePolicy(policyId, orgId = null) {
+    let endpoint = `/tyk/policies/${policyId}`;
+    if (orgId) {
+      endpoint += `?org_id=${orgId}`;
+    }
+    const result = await this.makeRequest('DELETE', endpoint);
     return result.data;
   }
 
@@ -298,7 +385,7 @@ class TykGatewayService {
   }
 
   // Analytics
-  async getAnalytics(apiId = null, resolution = 'day', from = null, to = null) {
+  async getAnalytics(apiId = null, resolution = 'day', from = null, to = null, orgId = null) {
     let endpoint = '/tyk/analytics';
     const params = new URLSearchParams();
     
@@ -306,6 +393,7 @@ class TykGatewayService {
     if (resolution) params.append('resolution', resolution);
     if (from) params.append('from', from);
     if (to) params.append('to', to);
+    if (orgId) params.append('org_id', orgId);
     
     if (params.toString()) {
       endpoint += `?${params.toString()}`;

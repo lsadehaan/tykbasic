@@ -433,10 +433,14 @@ const KeyManagement = () => {
                   </div>
 
                   <div className="key-info-item">
-                    <label>API Access:</label>
+                    <label>Access Policy:</label>
                     <span>
-                      {key.access_rights 
-                        ? Object.keys(key.access_rights).length + ' APIs'
+                      {key.apply_policies && key.apply_policies.length > 0
+                        ? key.apply_policies.length === 1 
+                          ? `Policy: ${key.apply_policies[0]}` 
+                          : `${key.apply_policies.length} Policies`
+                        : key.access_rights 
+                        ? `Legacy: ${Object.keys(key.access_rights).length} APIs`
                         : 'No access configured'
                       }
                     </span>
@@ -531,21 +535,30 @@ const KeyManagement = () => {
                 </div>
 
                 <div className="detail-section">
-                  <h3>API Access Rights</h3>
-                  {selectedKey.access_rights && Object.keys(selectedKey.access_rights).length > 0 ? (
-                    <div className="access-rights-list">
+                  <h3>Access Policies & API Rights</h3>
+                  {selectedKey.apply_policies && selectedKey.apply_policies.length > 0 ? (
+                    <div className="policies-list">
+                      <h4>Applied Policies:</h4>
+                      {selectedKey.apply_policies.map((policyId, index) => (
+                        <div key={index} className="policy-item">
+                          <code>{policyId}</code>
+                        </div>
+                      ))}
+                    </div>
+                  ) : selectedKey.access_rights && Object.keys(selectedKey.access_rights).length > 0 ? (
+                    <div className="legacy-access">
+                      <h4>Legacy API Access Rights:</h4>
                       {Object.entries(selectedKey.access_rights).map(([apiId, rights]) => (
-                        <div key={apiId} className="access-right-item">
-                          <h4>{rights.api_name || apiId}</h4>
-                          <p>Versions: {rights.versions?.join(', ') || 'Default'}</p>
-                          {rights.allowed_urls && rights.allowed_urls.length > 0 && (
-                            <p>Allowed URLs: {rights.allowed_urls.join(', ')}</p>
-                          )}
+                        <div key={apiId} className="api-access-item">
+                          <strong>{rights.api_name || apiId}</strong>
+                          <div className="access-details">
+                            <span>Versions: {rights.versions?.join(', ') || 'All'}</span>
+                          </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p>No API access configured</p>
+                    <p>No access policies or API rights configured</p>
                   )}
                 </div>
 

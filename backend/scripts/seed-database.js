@@ -3,6 +3,23 @@ const { sequelize, User, Organization, EmailWhitelist, SystemConfig } = require(
 
 async function seedDatabase() {
   try {
+    // Production safety check
+    if (process.env.NODE_ENV === 'production') {
+      console.error('❌ SECURITY WARNING: This seeding script is NOT safe for production!');
+      console.error('   It creates hardcoded credentials that are logged and discoverable.');
+      console.error('   Use the production bootstrap script instead:');
+      console.error('   node scripts/bootstrap-production.js');
+      console.error('');
+      console.error('   If you really need to run this in production (NOT RECOMMENDED),');
+      console.error('   set ALLOW_UNSAFE_SEEDING=true environment variable.');
+      
+      if (!process.env.ALLOW_UNSAFE_SEEDING) {
+        process.exit(1);
+      }
+      
+      console.warn('⚠️  PROCEEDING WITH UNSAFE SEEDING - CHANGE PASSWORDS IMMEDIATELY!');
+    }
+
     console.log('🌱 Starting database seeding...');
 
     // Sync database first

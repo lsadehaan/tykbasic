@@ -6,7 +6,7 @@
   "scripts": {
     "start": "npm run dev",
     "dev": "concurrently \"npm run backend:dev\" \"npm run frontend:dev\"",
-    "backend:dev": "nodemon backend/server.js",
+    "backend:dev": "cross-env NODE_ENV=development nodemon backend/server.js",
     "frontend:dev": "cd frontend && npm run dev",
     "backend:start": "node backend/server.js",
     "frontend:build": "cd frontend && npm run build",
@@ -63,6 +63,7 @@
   "devDependencies": {
     "@types/node": "^20.8.7",
     "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
     "eslint": "^8.52.0",
     "jest": "^29.7.0",
     "nodemon": "^3.0.1",

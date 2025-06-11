@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/Dashboard.css';
-import KeyCreationModal from './KeyCreationModal';
+import KeyCreationModal from './dashboard/KeyCreationModal';
 import KeySuccessModal from './KeySuccessModal';
 
 const Dashboard = () => {

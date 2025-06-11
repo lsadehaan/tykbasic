@@ -14,13 +14,14 @@ const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const tykRoutes = require('./routes/tyk');
 const userRoutes = require('./routes/user');
+const policyRoutes = require('./routes/policies');
 
 // Import middleware
 const errorHandler = require('./middleware/errorHandler');
 const logger = require('./middleware/logger');
 
 // Import database
-const { sequelize } = require('./models');
+const { sequelize, User, Organization } = require('./models');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -88,6 +89,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/tyk', tykRoutes);
 app.use('/api/user', userRoutes);
+app.use('/api/policies', policyRoutes);
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
@@ -101,6 +103,44 @@ if (process.env.NODE_ENV === 'production') {
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
+// Auto-create initial data if it doesn't exist
+async function createInitialData() {
+  try {
+    // Check if default organization exists
+    let defaultOrg = await Organization.findOne({ where: { name: 'default' } });
+    
+    if (!defaultOrg) {
+      defaultOrg = await Organization.create({
+        name: 'default',
+        display_name: 'Default Organization',
+        description: 'Default organization for TykBasic',
+        tyk_org_id: 'default'
+      });
+      appLogger.info('✅ Default organization created');
+    }
+    
+    // Check if admin user exists
+    const adminUser = await User.findOne({ where: { email: 'admin@tykbasic.local' } });
+    
+    if (!adminUser) {
+      await User.create({
+        email: 'admin@tykbasic.local',
+        password: 'admin123!', // Will be hashed automatically
+        first_name: 'Admin',
+        last_name: 'User',
+        role: 'super_admin',
+        organization_id: defaultOrg.id,
+        is_verified: true,
+        is_active: true
+      });
+      appLogger.info('✅ Admin user created (admin@tykbasic.local / admin123!)');
+    }
+    
+  } catch (error) {
+    appLogger.warn('⚠️  Initial data setup failed:', error.message);
+  }
+}
+
 // Database connection and server startup
 async function startServer() {
   try {
@@ -108,11 +148,13 @@ async function startServer() {
     await sequelize.authenticate();
     appLogger.info('Database connection established successfully.');
     
-    // Sync database (use { force: true } only in development to reset tables)
-    if (process.env.NODE_ENV === 'development') {
-      await sequelize.sync({ alter: true });
-      appLogger.info('Database synchronized successfully.');
-    }
+    // Sync database - create tables only if they don't exist
+    // This is safe and won't modify existing table structures
+    await sequelize.sync({ force: false });
+    appLogger.info('Database synchronized successfully.');
+    
+    // Auto-create initial data if none exists
+    await createInitialData();
     
     // Initialize email service
     try {

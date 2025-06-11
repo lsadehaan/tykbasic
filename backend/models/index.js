@@ -11,6 +11,10 @@ const UserCredentials = require('./UserCredentials')(sequelize, DataTypes);
 const ApiDefinition = require('./ApiDefinition')(sequelize, DataTypes);
 const ApiAccessGrant = require('./ApiAccessGrant')(sequelize, DataTypes);
 const AuditLog = require('./AuditLog')(sequelize, DataTypes);
+// Policy models
+const Policy = require('./Policy')(sequelize, DataTypes);
+const PolicyApiAccess = require('./PolicyApiAccess')(sequelize, DataTypes);
+const OrganizationAvailablePolicy = require('./OrganizationAvailablePolicy')(sequelize, DataTypes);
 
 // Define associations
 const setupAssociations = () => {
@@ -94,6 +98,67 @@ const setupAssociations = () => {
     as: 'organization',
     constraints: false
   });
+
+  // Policy associations
+  Policy.belongsTo(User, { 
+    foreignKey: 'created_by_user_id', 
+    as: 'creator' 
+  });
+  Policy.belongsTo(Organization, { 
+    foreignKey: 'owner_organization_id', 
+    as: 'ownerOrganization' 
+  });
+  Policy.belongsTo(Organization, { 
+    foreignKey: 'target_organization_id', 
+    as: 'targetOrganization' 
+  });
+
+  // PolicyApiAccess associations
+  PolicyApiAccess.belongsTo(Policy, { 
+    foreignKey: 'policy_id', 
+    as: 'policy' 
+  });
+  PolicyApiAccess.belongsTo(Organization, { 
+    foreignKey: 'api_organization_id', 
+    as: 'apiOrganization' 
+  });
+  Policy.hasMany(PolicyApiAccess, { 
+    foreignKey: 'policy_id', 
+    as: 'PolicyApiAccesses' 
+  });
+
+  // OrganizationAvailablePolicy associations
+  OrganizationAvailablePolicy.belongsTo(Organization, { 
+    foreignKey: 'organization_id', 
+    as: 'organization' 
+  });
+  OrganizationAvailablePolicy.belongsTo(Policy, { 
+    foreignKey: 'policy_id', 
+    as: 'policy' 
+  });
+  OrganizationAvailablePolicy.belongsTo(User, { 
+    foreignKey: 'assigned_by_user_id', 
+    as: 'assignedBy' 
+  });
+
+  Policy.hasMany(OrganizationAvailablePolicy, { 
+    foreignKey: 'policy_id', 
+    as: 'OrganizationAvailablePolicies' 
+  });
+  Organization.hasMany(OrganizationAvailablePolicy, { 
+    foreignKey: 'organization_id', 
+    as: 'availablePolicies' 
+  });
+
+  // UserCredentials and Policy associations
+  UserCredentials.belongsTo(Policy, { 
+    foreignKey: 'policy_id', 
+    as: 'policy' 
+  });
+  Policy.hasMany(UserCredentials, { 
+    foreignKey: 'policy_id', 
+    as: 'credentials' 
+  });
 };
 
 // Setup associations
@@ -111,7 +176,10 @@ const db = {
   UserCredentials,
   ApiDefinition,
   ApiAccessGrant,
-  AuditLog
+  AuditLog,
+  Policy,
+  PolicyApiAccess,
+  OrganizationAvailablePolicy
 };
 
 module.exports = db; 

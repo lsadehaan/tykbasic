@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import OrganizationManagement from './OrganizationManagement';
+import PolicyManagement from './admin/PolicyManagement';
 import './AdminDashboard.css';
 
 const AdminDashboard = () => {
@@ -15,6 +17,7 @@ const AdminDashboard = () => {
   const [pendingUsers, setPendingUsers] = useState([]);
   const [emailWhitelist, setEmailWhitelist] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [organizations, setOrganizations] = useState([]);
 
   // Pagination and filtering
   const [usersPage, setUsersPage] = useState(1);
@@ -47,12 +50,21 @@ const AdminDashboard = () => {
   // useEffect must be before any early returns
   useEffect(() => {
     if (user && ['super_admin', 'admin'].includes(user.role)) {
+      // Always fetch organizations as they're needed for user editing
+      fetchOrganizations();
+      
       if (activeTab === 'dashboard') {
         fetchStatistics();
       } else if (activeTab === 'users') {
         fetchUsers(usersPage, userFilters);
+        fetchOrganizations(); // Fetch organizations for user editing
       } else if (activeTab === 'pending') {
         fetchPendingUsers();
+        fetchOrganizations(); // Fetch organizations for user approval
+      } else if (activeTab === 'organizations') {
+        // Organizations component handles its own data fetching
+      } else if (activeTab === 'policies') {
+        // PolicyManagement component handles its own data fetching
       } else if (activeTab === 'whitelist') {
         fetchEmailWhitelist();
       } else if (activeTab === 'settings') {
@@ -149,25 +161,51 @@ const AdminDashboard = () => {
     }
   };
 
-  const approveUser = async (pendingUserId, role = 'user') => {
+  const fetchOrganizations = async () => {
+    try {
+      const response = await fetch('/api/admin/organizations', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setOrganizations(data.organizations || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch organizations:', err);
+    }
+  };
+
+  const approveUser = async (pendingUserId, role = 'user', organizationId = null) => {
     setIsLoading(true);
     setError('');
     setSuccess('');
 
     try {
+      const requestBody = { role };
+      if (organizationId) {
+        requestBody.organizationId = organizationId;
+      }
+
       const response = await fetch(`/api/admin/pending-users/${pendingUserId}/approve`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ role })
+        body: JSON.stringify(requestBody)
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        setSuccess(`User approved successfully with role: ${role}`);
+        const orgName = organizationId ? 
+          organizations.find(org => org.id === organizationId)?.displayName || 'Selected Organization' : 
+          'Default Organization';
+        setSuccess(`User approved successfully with role: ${role} in ${orgName}`);
         fetchPendingUsers();
         fetchUsers();
         fetchStatistics();
@@ -353,6 +391,8 @@ const AdminDashboard = () => {
     }
   };
 
+
+
   const renderDashboard = () => (
     <div className="admin-section">
       <h2>System Overview</h2>
@@ -426,6 +466,7 @@ const AdminDashboard = () => {
             <tr>
               <th>Name</th>
               <th>Email</th>
+              <th>Organization</th>
               <th>Role</th>
               <th>Status</th>
               <th>Last Login</th>
@@ -433,28 +474,33 @@ const AdminDashboard = () => {
             </tr>
           </thead>
           <tbody>
-            {users.map(user => (
-              <tr key={user.id}>
-                <td>{user.fullName}</td>
-                <td>{user.email}</td>
+            {users.map(tableUser => (
+              <tr key={tableUser.id}>
+                <td>{tableUser.fullName}</td>
+                <td>{tableUser.email}</td>
                 <td>
-                  <span className={`role-badge role-${user.role}`}>
-                    {user.role.replace('_', ' ')}
+                  <span className="org-name" title={tableUser.organization?.name}>
+                    {tableUser.organization?.displayName || tableUser.organization?.name || 'Default'}
                   </span>
                 </td>
                 <td>
-                  <span className={`status-badge ${user.isActive ? 'active' : 'inactive'}`}>
-                    {user.isActive ? 'Active' : 'Inactive'}
+                  <span className={`role-badge role-${tableUser.role}`}>
+                    {tableUser.role.replace('_', ' ')}
                   </span>
                 </td>
                 <td>
-                  {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}
+                  <span className={`status-badge ${tableUser.isActive ? 'active' : 'inactive'}`}>
+                    {tableUser.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                </td>
+                <td>
+                  {tableUser.lastLogin ? new Date(tableUser.lastLogin).toLocaleDateString() : 'Never'}
                 </td>
                 <td>
                   <button
                     className="btn btn-sm btn-primary"
                     onClick={() => {
-                      setSelectedUser(user);
+                      setSelectedUser(tableUser);
                       setShowUserModal(true);
                     }}
                   >
@@ -485,32 +531,49 @@ const AdminDashboard = () => {
                 <p>Requested: {new Date(user.createdAt).toLocaleDateString()}</p>
               </div>
               <div className="user-actions">
-                <select 
-                  className="role-select"
-                  defaultValue="user"
-                  id={`role-${user.id}`}
-                >
-                  <option value="user">User</option>
-                  <option value="admin">Admin</option>
-                  {user.role === 'super_admin' && <option value="super_admin">Super Admin</option>}
-                </select>
-                <button
-                  className="btn btn-success"
-                  onClick={() => {
-                    const role = document.getElementById(`role-${user.id}`).value;
-                    approveUser(user.id, role);
-                  }}
-                  disabled={isLoading}
-                >
-                  Approve
-                </button>
-                <button
-                  className="btn btn-danger"
-                  onClick={() => rejectUser(user.id)}
-                  disabled={isLoading}
-                >
-                  Reject
-                </button>
+                <div className="approval-controls">
+                  <select 
+                    className="role-select"
+                    defaultValue="user"
+                    id={`role-${user.id}`}
+                  >
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                    {user.role === 'super_admin' && <option value="super_admin">Super Admin</option>}
+                  </select>
+                  <select 
+                    className="org-select"
+                    defaultValue={user.organization?.id || ''}
+                    id={`org-${user.id}`}
+                  >
+                    <option value="">Select organization...</option>
+                    {organizations?.map(org => (
+                      <option key={org.id} value={org.id}>
+                        {org.displayName || org.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="action-buttons">
+                  <button
+                    className="btn btn-success"
+                    onClick={() => {
+                      const role = document.getElementById(`role-${user.id}`).value;
+                      const orgId = document.getElementById(`org-${user.id}`).value;
+                      approveUser(user.id, role, orgId);
+                    }}
+                    disabled={isLoading}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => rejectUser(user.id)}
+                    disabled={isLoading}
+                  >
+                    Reject
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -823,6 +886,18 @@ const AdminDashboard = () => {
           )}
         </button>
         <button
+          className={`tab ${activeTab === 'organizations' ? 'active' : ''}`}
+          onClick={() => setActiveTab('organizations')}
+        >
+          Organizations
+        </button>
+        <button
+          className={`tab ${activeTab === 'policies' ? 'active' : ''}`}
+          onClick={() => setActiveTab('policies')}
+        >
+          Policy Management
+        </button>
+        <button
           className={`tab ${activeTab === 'whitelist' ? 'active' : ''}`}
           onClick={() => setActiveTab('whitelist')}
         >
@@ -840,6 +915,8 @@ const AdminDashboard = () => {
         {activeTab === 'dashboard' && renderDashboard()}
         {activeTab === 'users' && renderUsers()}
         {activeTab === 'pending' && renderPendingUsers()}
+        {activeTab === 'organizations' && <OrganizationManagement />}
+        {activeTab === 'policies' && <PolicyManagement />}
         {activeTab === 'whitelist' && renderEmailWhitelist()}
         {activeTab === 'settings' && renderSettings()}
       </div>
@@ -855,6 +932,7 @@ const AdminDashboard = () => {
           onUpdate={updateUser}
           currentUserRole={user.role}
           isLoading={isLoading}
+          organizations={organizations}
         />
       )}
     </div>
@@ -862,11 +940,12 @@ const AdminDashboard = () => {
 };
 
 // User Edit Modal Component
-const UserEditModal = ({ user, onClose, onUpdate, currentUserRole, isLoading }) => {
+const UserEditModal = ({ user, onClose, onUpdate, currentUserRole, isLoading, organizations }) => {
   const [formData, setFormData] = useState({
     firstName: user.firstName || '',
     lastName: user.lastName || '',
     role: user.role || 'user',
+    organizationId: user.organization?.id || '',
     isActive: user.isActive !== undefined ? user.isActive : true,
     resetFailedAttempts: false,
     forcePasswordReset: false
@@ -919,6 +998,26 @@ const UserEditModal = ({ user, onClose, onUpdate, currentUserRole, isLoading }) 
               </select>
             </div>
           )}
+          
+          <div className="form-group">
+            <label>Organization</label>
+            <select
+              value={formData.organizationId}
+              onChange={(e) => setFormData({...formData, organizationId: e.target.value})}
+              required
+            >
+              <option value="">Select an organization...</option>
+              {organizations?.map(org => (
+                <option key={org.id} value={org.id}>
+                  {org.displayName || org.name}
+                </option>
+              ))}
+            </select>
+            <small className="form-help">
+              {formData.organizationId !== user.organization?.id && 
+               'Changing organization will move the user from their current organization'}
+            </small>
+          </div>
           
           <div className="form-group">
             <label>

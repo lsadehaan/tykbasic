@@ -1,6 +1,6 @@
 const express = require('express');
 const tykGatewayService = require('../services/TykGatewayService');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireOrganizationForApiOperations, getUserTykContext } = require('../middleware/auth');
 const { AuditLog } = require('../models');
 const UserCredentials = require('../models').UserCredentials;
 
@@ -9,16 +9,56 @@ const router = express.Router();
 // Apply authentication to all Tyk routes
 router.use(authenticateToken);
 
-// Helper function to log Tyk operations
+// Apply organization access control to all Tyk API operations
+router.use(requireOrganizationForApiOperations);
+
+// Helper function to get organization context for Tyk operations
+const getTykOrgContext = async (req) => {
+  try {
+    if (req.user.role === 'super_admin') {
+      // Super admins can optionally specify org context via query params
+      const { org_id } = req.query;
+      if (org_id) {
+        // Convert database org ID to tyk_org_id
+        const { Organization } = require('../models');
+        const targetOrg = await Organization.findByPk(org_id);
+        if (!targetOrg) {
+          throw new Error(`Organization with ID ${org_id} not found`);
+        }
+        return {
+          orgId: targetOrg.tyk_org_id || 'default',
+          orgKey: targetOrg.tyk_org_key,
+          organizationName: targetOrg.name,
+          rateLimits: targetOrg.default_rate_limits || {}
+        };
+      }
+      // Default to their own organization if no override
+      return getUserTykContext(req.user);
+    } else {
+      // Regular users must use their organization context
+      return getUserTykContext(req.user);
+    }
+  } catch (error) {
+    throw new Error(`Invalid organization context: ${error.message}`);
+  }
+};
+
+// Enhanced helper function to log Tyk operations with organization context
 const logTykOperation = async (req, action, resourceType, resourceId, details, error = null) => {
   try {
+    const orgContext = await getTykOrgContext(req);
+    
     await AuditLog.create({
       user_id: req.user.id,
       organization_id: req.user.organization_id,
       action: action,
       resource_type: resourceType,
       resource_id: resourceId,
-      details: details,
+      details: {
+        ...details,
+        tykOrgId: orgContext.orgId,
+        organizationName: orgContext.organizationName
+      },
       ip_address: req.ip,
       user_agent: req.get('User-Agent'),
       status: error ? 'error' : 'success',
@@ -92,9 +132,10 @@ router.get('/apis', async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   
   try {
-    console.log(`📋 [${requestId}] Fetching APIs for user: ${req.user.email}`);
+    const orgContext = await getTykOrgContext(req);
+    console.log(`📋 [${requestId}] Fetching APIs for user: ${req.user.email} (org: ${orgContext.organizationName})`);
     
-    const apis = await tykGatewayService.getApis();
+    const apis = await tykGatewayService.getApis(orgContext.orgId);
     
     await logTykOperation(req, 'list_apis', 'api', null, {
       requestId: requestId,
@@ -128,9 +169,20 @@ router.get('/apis/:apiId', async (req, res) => {
   const { apiId } = req.params;
   
   try {
-    console.log(`📋 [${requestId}] Fetching API ${apiId} for user: ${req.user.email}`);
+    const orgContext = await getTykOrgContext(req);
+    console.log(`📋 [${requestId}] Fetching API ${apiId} for user: ${req.user.email} (org: ${orgContext.organizationName})`);
     
     const api = await tykGatewayService.getApi(apiId);
+    
+    // SECURITY: Verify API belongs to user's organization
+    if (api && api.org_id !== orgContext.orgId) {
+      console.warn(`🚫 [${requestId}] Access denied: API ${apiId} belongs to org ${api.org_id}, user is in org ${orgContext.orgId}`);
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: API does not belong to your organization',
+        timestamp: new Date().toISOString()
+      });
+    }
     
     await logTykOperation(req, 'get_api', 'api', apiId, {
       requestId: requestId,
@@ -162,12 +214,13 @@ router.post('/apis', async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   
   try {
-    console.log(`🆕 [${requestId}] Creating API for user: ${req.user.email}`, {
+    const orgContext = await getTykOrgContext(req);
+    console.log(`🆕 [${requestId}] Creating API for user: ${req.user.email} (org: ${orgContext.organizationName})`, {
       apiName: req.body.name,
       listenPath: req.body.proxy?.listen_path
     });
     
-    const newApi = await tykGatewayService.createApi(req.body);
+    const newApi = await tykGatewayService.createApi(req.body, orgContext.orgId);
     
     await logTykOperation(req, 'create_api', 'api', newApi.key || newApi.id, {
       requestId: requestId,
@@ -203,7 +256,24 @@ router.put('/apis/:apiId', async (req, res) => {
   const { apiId } = req.params;
   
   try {
-    console.log(`✏️ [${requestId}] Updating API ${apiId} for user: ${req.user.email}`);
+    const orgContext = await getTykOrgContext(req);
+    console.log(`✏️ [${requestId}] Updating API ${apiId} for user: ${req.user.email} (org: ${orgContext.organizationName})`);
+    
+    // SECURITY: First verify the API belongs to user's organization
+    const existingApi = await tykGatewayService.getApi(apiId);
+    if (existingApi && existingApi.org_id !== orgContext.orgId) {
+      console.warn(`🚫 [${requestId}] Access denied: Cannot update API ${apiId} from different organization`);
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: API does not belong to your organization',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Ensure org_id is set correctly in the update data
+    if (!req.body.org_id) {
+      req.body.org_id = orgContext.orgId;
+    }
     
     const updatedApi = await tykGatewayService.updateApi(apiId, req.body);
     
@@ -239,7 +309,19 @@ router.delete('/apis/:apiId', async (req, res) => {
   const { apiId } = req.params;
   
   try {
-    console.log(`🗑️ [${requestId}] Deleting API ${apiId} for user: ${req.user.email}`);
+    const orgContext = await getTykOrgContext(req);
+    console.log(`🗑️ [${requestId}] Deleting API ${apiId} for user: ${req.user.email} (org: ${orgContext.organizationName})`);
+    
+    // SECURITY: First verify the API belongs to user's organization
+    const existingApi = await tykGatewayService.getApi(apiId);
+    if (existingApi && existingApi.org_id !== orgContext.orgId) {
+      console.warn(`🚫 [${requestId}] Access denied: Cannot delete API ${apiId} from different organization`);
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: API does not belong to your organization',
+        timestamp: new Date().toISOString()
+      });
+    }
     
     const result = await tykGatewayService.deleteApi(apiId);
     
@@ -272,12 +354,12 @@ router.delete('/apis/:apiId', async (req, res) => {
 // Key Management
 router.get('/keys', async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
-  const { orgId = 'all' } = req.query;
-
-  console.log(`🔑 [${requestId}] Fetching keys for user: ${req.user.email}`, { orgId });
-
+  
   try {
-    const response = await tykGatewayService.getKeys();
+    const orgContext = await getTykOrgContext(req);
+    console.log(`🔑 [${requestId}] Fetching keys for user: ${req.user.email} (org: ${orgContext.organizationName})`);
+
+    const response = await tykGatewayService.getKeys(orgContext.orgId);
     
     console.log(`🔍 [${requestId}] Raw Tyk keys response:`, JSON.stringify(response, null, 2));
 
@@ -299,7 +381,7 @@ router.get('/keys', async (req, res) => {
     for (const keyId of keyIds) {
       try {
         console.log(`🔍 [${requestId}] Fetching details for key: ${keyId}`);
-        const keyDetail = await tykGatewayService.getKey(keyId);
+        const keyDetail = await tykGatewayService.getKey(keyId, true, orgContext.orgId);
         
         if (keyDetail) {
           // Process key data with priority: alias > meta_data > fallback
@@ -374,7 +456,7 @@ router.get('/keys', async (req, res) => {
       resource_id: null,
       details: {
         key_count: detailedKeys.length,
-        org_filter: orgId
+        org_filter: orgContext.orgId
       },
       ip_address: req.ip,
       user_agent: req.get('User-Agent'),
@@ -427,25 +509,15 @@ router.post('/keys', async (req, res) => {
   const { 
     name,           // Will be stored as alias
     description,    // Will be stored in meta_data.description
-    allowance = 1000,
-    rate = 1000,
-    per = 60,
-    quota_max,
-    quota_renewal_rate,
-    expires = null,
-    access_rights = {}
+    policy_id,      // NEW: Policy to apply to this key
+    expires = null
   } = req.body;
 
-  console.log(`🔑 [${requestId}] Creating new key:`, {
+  console.log(`🔑 [${requestId}] Creating new policy-based key:`, {
     name,
     hasDescription: !!description,
-    allowance,
-    rate,
-    per,
-    quota_max,
-    quota_renewal_rate,
+    policy_id,
     expires,
-    accessRightCount: Object.keys(access_rights).length,
     userId: req.user.id,
     userEmail: req.user.email
   });
@@ -468,60 +540,70 @@ router.post('/keys', async (req, res) => {
       });
     }
 
-    // Prepare key data for Tyk
+    if (!policy_id) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'Policy selection is required',
+        field: 'policy_id'
+      });
+    }
+
+    // Get user's organization context
+    const { orgId } = await getTykOrgContext(req);
+    
+    // Validate that the policy is available to this organization
+    // Use the database organization ID for policy validation, not the Tyk org ID
+    const policyService = require('../services/PolicyService');
+    const policy = await policyService.validatePolicyAccess(policy_id, req.user.organization_id);
+    
+    if (!policy) {
+      return res.status(403).json({
+        error: 'Access denied',
+        message: 'Selected policy is not available to your organization'
+      });
+    }
+
+    // Prepare key data for Tyk using policy
     const keyData = {
-      org_id: "default",
-      alias: name.trim(),                    // ✅ Use alias for name
-      meta_data: {                          // ✅ Store custom data in meta_data
+      org_id: orgId,
+      alias: name.trim(),
+      apply_policies: [policy.tyk_policy_id], // Use policy instead of access_rights
+      meta_data: {
         description: description?.trim() || "",
         created_by: req.user.email,
         created_by_id: req.user.id,
         created_at: new Date().toISOString(),
         project: "tykbasic",
-        user_type: "frontend_user"
-      },
-      allowance: parseInt(allowance) || 1000,
-      rate: parseInt(rate) || 1000,
-      per: parseInt(per) || 60
+        user_type: "frontend_user",
+        policy_id: policy_id,
+        policy_name: policy.name
+      }
     };
-
-    // Only add access_rights if we have actual access rights to grant
-    // Empty access_rights object causes Tyk 500 errors
-    if (access_rights && Object.keys(access_rights).length > 0) {
-      keyData.access_rights = access_rights;
-    }
-
-    // Add quota settings if provided
-    if (quota_max && quota_max > 0) {
-      keyData.quota_max = parseInt(quota_max);
-      keyData.quota_renewal_rate = parseInt(quota_renewal_rate) || 3600;
-    }
 
     // Add expiration if provided
     if (expires) {
       keyData.expires = parseInt(expires);
     }
 
-    console.log(`🌐 [${requestId}] Tyk key creation request:`, {
+    console.log(`🌐 [${requestId}] Tyk policy-based key creation request:`, {
       alias: keyData.alias,
       org_id: keyData.org_id,
-      allowance: keyData.allowance,
-      rate: keyData.rate,
-      per: keyData.per,
-      hasQuota: !!keyData.quota_max,
+      policy_id: policy.tyk_policy_id,
+      policy_name: policy.name,
       hasExpiration: !!keyData.expires,
       metaDataKeys: Object.keys(keyData.meta_data)
     });
 
-    const response = await tykGatewayService.createKey(keyData);
+    const response = await tykGatewayService.createKey(keyData, orgId);
 
-    console.log(`✅ [${requestId}] Key created successfully:`, {
+    console.log(`✅ [${requestId}] Policy-based key created successfully:`, {
       keyHash: response.key_hash || response.key?.substring(0, 8) + '...' || 'unknown',
       action: response.action,
-      status: response.status
+      status: response.status,
+      policy: policy.name
     });
 
-    // Store minimal reference in database (just for audit/tracking)
+    // Store reference in database with policy information
     try {
       await UserCredentials.create({
         user_id: req.user.id,
@@ -529,81 +611,60 @@ router.post('/keys', async (req, res) => {
         credential_type: 'api_key',
         name: name.trim(),
         description: description?.trim() || null,
-        tyk_key_id: response.key,           // The actual key value (shown once)
-        tyk_key_hash: response.key_hash,    // The hash for subsequent operations
-        api_key_data: {
-          alias: keyData.alias,
-          org_id: keyData.org_id,
-          created_via: 'frontend'
-        }
+        tyk_key_id: response.key,
+        tyk_key_hash: response.key_hash,
+        tyk_policy_id: policy.tyk_policy_id,
+        policy_id: policy_id
       });
 
-      console.log(`💾 [${requestId}] Database record created for key`);
+      console.log(`💾 [${requestId}] Database record created for policy-based key`);
     } catch (dbError) {
       console.warn(`⚠️  [${requestId}] Database storage failed (non-critical):`, dbError.message);
-      // Don't fail the request if database storage fails
     }
 
-          // Create audit log
-      await AuditLog.create({
-        user_id: req.user.id,
-        organization_id: req.user.organization_id,
-        action: 'CREATE',
-        resource_type: 'api_key',
-        resource_id: response.key_hash || response.key,
-        details: {
-          key_name: name,
-          key_hash: response.key_hash || response.key,
-        rate_limit: { rate, per, allowance },
-        has_quota: !!quota_max,
-        has_expiration: !!expires
-      },
-      ip_address: req.ip,
-      user_agent: req.get('User-Agent'),
-      status: 'success'
+    // Create audit log
+    await logTykOperation(req, 'create_key', 'api_key', response.key_hash || response.key, {
+      requestId: requestId,
+      key_name: name,
+      policy_id: policy_id,
+      policy_name: policy.name,
+      has_expiration: !!expires
     });
 
     res.status(201).json({
       success: true,
       message: 'API key created successfully',
       data: {
-        key: response.key,                           // ⚠️  The actual key - shown only once!
-        key_hash: response.key_hash || response.key, // The hash for subsequent operations
+        key: response.key,
+        key_hash: response.key_hash || response.key,
         action: response.action,
         name: name,
         description: description || '',
         alias: keyData.alias,
+        policy: {
+          id: policy_id,
+          name: policy.name,
+          tyk_policy_id: policy.tyk_policy_id
+        },
         meta_data: keyData.meta_data,
         security_notice: 'This key will only be displayed once. Save it securely.'
       }
     });
 
   } catch (error) {
-    console.error(`❌ [${requestId}] Key creation failed:`, {
+    console.error(`❌ [${requestId}] Policy-based key creation failed:`, {
       error: error.message,
       stack: error.stack,
       userId: req.user.id
     });
 
     // Create audit log for failure
-    try {
-      await AuditLog.create({
-        user_id: req.user.id,
-        organization_id: req.user.organization_id,
-        action: 'CREATE',
-        resource_type: 'api_key',
-        resource_id: null,
-        details: {
-          error: error.message,
-          attempted_key_name: name
-        },
-        ip_address: req.ip,
-        user_agent: req.get('User-Agent'),
-        status: 'failed'
-      });
-    } catch (auditError) {
-      console.error('Failed to create audit log:', auditError);
-    }
+    await logTykOperation(req, 'create_key', 'api_key', null, {
+      requestId: requestId,
+      error: error.message,
+      attempted_key_name: name,
+      policy_id: policy_id
+    }, error);
 
     res.status(500).json({
       error: 'Key creation failed',
@@ -620,7 +681,8 @@ router.get('/keys/:keyId', async (req, res) => {
   try {
     console.log(`🔑 [${requestId}] Fetching key ${keyId} for user: ${req.user.email}`);
     
-    const key = await tykGatewayService.getKey(keyId, hashed === 'true');
+    const { orgId } = await getTykOrgContext(req);
+    const key = await tykGatewayService.getKey(keyId, hashed === 'true', orgId);
     
     await logTykOperation(req, 'get_key', 'key', keyId, {
       requestId: requestId,
@@ -656,7 +718,8 @@ router.put('/keys/:keyId', async (req, res) => {
   try {
     console.log(`✏️ [${requestId}] Updating key ${keyId} for user: ${req.user.email}`);
     
-    const updatedKey = await tykGatewayService.updateKey(keyId, req.body, hashed === 'true');
+    const { orgId } = await getTykOrgContext(req);
+    const updatedKey = await tykGatewayService.updateKey(keyId, req.body, hashed === 'true', orgId);
     
     await logTykOperation(req, 'update_key', 'key', keyId, {
       requestId: requestId,
@@ -693,7 +756,8 @@ router.delete('/keys/:keyId', async (req, res) => {
   try {
     console.log(`🗑️ [${requestId}] Deleting key ${keyId} for user: ${req.user.email}`);
     
-    const result = await tykGatewayService.deleteKey(keyId, hashed === 'true');
+    const { orgId } = await getTykOrgContext(req);
+    const result = await tykGatewayService.deleteKey(keyId, hashed === 'true', orgId);
     
     await logTykOperation(req, 'delete_key', 'key', keyId, {
       requestId: requestId,
@@ -729,7 +793,8 @@ router.get('/certificates', async (req, res) => {
   try {
     console.log(`📋 [${requestId}] Fetching certificates for user: ${req.user.email}`);
     
-    const certificates = await tykGatewayService.getCertificates('default');
+    const { orgId } = await getTykOrgContext(req);
+    const certificates = await tykGatewayService.getCertificates(orgId);
     
     await logTykOperation(req, 'list_certificates', 'certificate', null, {
       requestId: requestId,
@@ -753,6 +818,126 @@ router.get('/certificates', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch certificates',
+      error: error.message
+    });
+  }
+});
+
+// Upload certificate
+router.post('/certificates', async (req, res) => {
+  const requestId = Math.random().toString(36).substring(7);
+  
+  try {
+    console.log(`📤 [${requestId}] Uploading certificate for user: ${req.user.email}`);
+    
+    const { certificate, name, description } = req.body;
+    
+    if (!certificate || !certificate.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Certificate PEM data is required'
+      });
+    }
+
+    const { orgId } = await getTykOrgContext(req);
+    const result = await tykGatewayService.uploadCertificate(certificate, orgId);
+    
+    await logTykOperation(req, 'upload_certificate', 'certificate', result.id, {
+      requestId: requestId,
+      name: name,
+      description: description
+    });
+
+    res.json({
+      success: true,
+      data: result,
+      message: 'Certificate uploaded successfully',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`💥 [${requestId}] Failed to upload certificate:`, error);
+    
+    await logTykOperation(req, 'upload_certificate', 'certificate', null, {
+      requestId: requestId
+    }, error);
+
+    res.status(error.status || 500).json({
+      success: false,
+      message: 'Failed to upload certificate',
+      error: error.message
+    });
+  }
+});
+
+// Get certificate details
+router.get('/certificates/:certId', async (req, res) => {
+  const requestId = Math.random().toString(36).substring(7);
+  const { certId } = req.params;
+  
+  try {
+    console.log(`🔍 [${requestId}] Fetching certificate ${certId} for user: ${req.user.email}`);
+    
+    const { orgId } = await getTykOrgContext(req);
+    const certificate = await tykGatewayService.getCertificate(certId, orgId);
+    
+    await logTykOperation(req, 'get_certificate', 'certificate', certId, {
+      requestId: requestId
+    });
+
+    res.json({
+      success: true,
+      data: certificate,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`💥 [${requestId}] Failed to fetch certificate ${certId}:`, error);
+    
+    await logTykOperation(req, 'get_certificate', 'certificate', certId, {
+      requestId: requestId
+    }, error);
+
+    res.status(error.status || 500).json({
+      success: false,
+      message: `Failed to fetch certificate ${certId}`,
+      error: error.message
+    });
+  }
+});
+
+// Delete certificate
+router.delete('/certificates/:certId', async (req, res) => {
+  const requestId = Math.random().toString(36).substring(7);
+  const { certId } = req.params;
+  
+  try {
+    console.log(`🗑️ [${requestId}] Deleting certificate ${certId} for user: ${req.user.email}`);
+    
+    const { orgId } = await getTykOrgContext(req);
+    const result = await tykGatewayService.deleteCertificate(certId, orgId);
+    
+    await logTykOperation(req, 'delete_certificate', 'certificate', certId, {
+      requestId: requestId
+    });
+
+    res.json({
+      success: true,
+      data: result,
+      message: 'Certificate deleted successfully',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`💥 [${requestId}] Failed to delete certificate ${certId}:`, error);
+    
+    await logTykOperation(req, 'delete_certificate', 'certificate', certId, {
+      requestId: requestId
+    }, error);
+
+    res.status(error.status || 500).json({
+      success: false,
+      message: `Failed to delete certificate ${certId}`,
       error: error.message
     });
   }
@@ -818,139 +1003,18 @@ router.post('/certificates/generate', async (req, res) => {
   }
 });
 
-router.post('/certificates', async (req, res) => {
-  const requestId = Math.random().toString(36).substring(7);
-  
-  try {
-    console.log(`📋 [${requestId}] Uploading certificate for user: ${req.user.email}`);
-    
-    const { certificate, name, description } = req.body;
-    
-    if (!certificate) {
-      return res.status(400).json({
-        success: false,
-        message: 'Certificate PEM data is required'
-      });
-    }
-
-    // Validate certificate format (basic check)
-    if (!certificate.includes('-----BEGIN CERTIFICATE-----')) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid certificate format. Must be PEM encoded.'
-      });
-    }
-    
-    const result = await tykGatewayService.uploadCertificate(certificate, 'default');
-    
-    await logTykOperation(req, 'upload_certificate', 'certificate', result.id || result.key, {
-      requestId: requestId,
-      certificateName: name || 'unnamed',
-      description: description || ''
-    });
-
-    res.status(201).json({
-      success: true,
-      data: result,
-      message: 'Certificate uploaded successfully',
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error(`💥 [${requestId}] Failed to upload certificate:`, error);
-    
-    await logTykOperation(req, 'upload_certificate', 'certificate', null, {
-      requestId: requestId
-    }, error);
-
-    res.status(error.status || 500).json({
-      success: false,
-      message: 'Failed to upload certificate',
-      error: error.message
-    });
-  }
-});
-
-router.get('/certificates/:certId', async (req, res) => {
-  const requestId = Math.random().toString(36).substring(7);
-  const { certId } = req.params;
-  
-  try {
-    console.log(`📋 [${requestId}] Fetching certificate ${certId} for user: ${req.user.email}`);
-    
-    const certificate = await tykGatewayService.getCertificate(certId, 'default');
-    
-    await logTykOperation(req, 'get_certificate', 'certificate', certId, {
-      requestId: requestId
-    });
-
-    res.json({
-      success: true,
-      data: certificate,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error(`💥 [${requestId}] Failed to fetch certificate ${certId}:`, error);
-    
-    await logTykOperation(req, 'get_certificate', 'certificate', certId, {
-      requestId: requestId
-    }, error);
-
-    res.status(error.status || 500).json({
-      success: false,
-      message: `Failed to fetch certificate ${certId}`,
-      error: error.message
-    });
-  }
-});
-
-router.delete('/certificates/:certId', async (req, res) => {
-  const requestId = Math.random().toString(36).substring(7);
-  const { certId } = req.params;
-  
-  try {
-    console.log(`🗑️ [${requestId}] Deleting certificate ${certId} for user: ${req.user.email}`);
-    
-    const result = await tykGatewayService.deleteCertificate(certId, 'default');
-    
-    await logTykOperation(req, 'delete_certificate', 'certificate', certId, {
-      requestId: requestId
-    });
-
-    res.json({
-      success: true,
-      data: result,
-      message: 'Certificate deleted successfully',
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error(`💥 [${requestId}] Failed to delete certificate ${certId}:`, error);
-    
-    await logTykOperation(req, 'delete_certificate', 'certificate', certId, {
-      requestId: requestId
-    }, error);
-
-    res.status(error.status || 500).json({
-      success: false,
-      message: `Failed to delete certificate ${certId}`,
-      error: error.message
-    });
-  }
-});
-
-// Gateway Operations
+// Gateway Reload
 router.post('/gateway/reload', async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   
   try {
-    console.log(`🔄 [${requestId}] Reloading gateway for user: ${req.user.email}`);
+    console.log(`🔄 [${requestId}] Reloading Tyk Gateway for user: ${req.user.email}`);
     
     const result = await tykGatewayService.reloadGateway();
     
     await logTykOperation(req, 'gateway_reload', 'gateway', 'main', {
-      requestId: requestId
+      requestId: requestId,
+      reloadStatus: 'success'
     });
 
     res.json({
@@ -964,7 +1028,8 @@ router.post('/gateway/reload', async (req, res) => {
     console.error(`💥 [${requestId}] Failed to reload gateway:`, error);
     
     await logTykOperation(req, 'gateway_reload', 'gateway', 'main', {
-      requestId: requestId
+      requestId: requestId,
+      reloadStatus: 'failed'
     }, error);
 
     res.status(error.status || 500).json({
@@ -975,4 +1040,134 @@ router.post('/gateway/reload', async (req, res) => {
   }
 });
 
-module.exports = router; 
+// Gateway Statistics (Organization-scoped)
+router.get('/gateway/statistics', async (req, res) => {
+  const requestId = Math.random().toString(36).substring(7);
+  
+  try {
+    const orgContext = await getTykOrgContext(req);
+    console.log(`📊 [${requestId}] Fetching gateway statistics for user: ${req.user.email} (org: ${orgContext.organizationName})`);
+    
+    // Get organization-scoped statistics
+    const [apis, keys, policies, certificates] = await Promise.all([
+      tykGatewayService.getApis(orgContext.orgId),
+      tykGatewayService.getKeys(orgContext.orgId),
+      tykGatewayService.getPolicies(orgContext.orgId),
+      tykGatewayService.getCertificates(orgContext.orgId)
+    ]);
+
+    // Calculate statistics
+    const statistics = {
+      apis: {
+        total: Array.isArray(apis) ? apis.length : 0,
+        active: Array.isArray(apis) ? apis.filter(api => api.active !== false).length : 0,
+        inactive: Array.isArray(apis) ? apis.filter(api => api.active === false).length : 0
+      },
+      keys: {
+        total: Array.isArray(keys) ? keys.length : 0,
+        active: Array.isArray(keys) ? keys.filter(key => key.active !== false).length : 0,
+        inactive: Array.isArray(keys) ? keys.filter(key => key.active === false).length : 0
+      },
+      policies: {
+        total: Array.isArray(policies) ? policies.length : 0,
+        active: Array.isArray(policies) ? policies.filter(policy => policy.active !== false).length : 0
+      },
+      certificates: {
+        total: Array.isArray(certificates) ? certificates.length : 0
+      },
+      organization: {
+        id: orgContext.orgId,
+        name: orgContext.organizationName
+      }
+    };
+    
+    await logTykOperation(req, 'get_gateway_statistics', 'gateway', 'statistics', {
+      requestId: requestId,
+      apiCount: statistics.apis.total,
+      keyCount: statistics.keys.total,
+      policyCount: statistics.policies.total,
+      certificateCount: statistics.certificates.total
+    });
+
+    res.json({
+      success: true,
+      data: statistics,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`💥 [${requestId}] Failed to fetch gateway statistics:`, error);
+    
+    await logTykOperation(req, 'get_gateway_statistics', 'gateway', 'statistics', {
+      requestId: requestId
+    }, error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch gateway statistics',
+      error: error.message
+    });
+  }
+});
+
+// Analytics endpoint (Organization-scoped)
+router.get('/analytics', async (req, res) => {
+  const requestId = Math.random().toString(36).substring(7);
+  
+  try {
+    const orgContext = await getTykOrgContext(req);
+    const { api_id, resolution = 'day', from, to } = req.query;
+    
+    console.log(`📈 [${requestId}] Fetching analytics for user: ${req.user.email} (org: ${orgContext.organizationName})`);
+    
+    // If api_id is specified, verify it belongs to the user's organization
+    if (api_id) {
+      const apis = await tykGatewayService.getApis(orgContext.orgId);
+      const apiExists = Array.isArray(apis) && apis.some(api => api.api_id === api_id);
+      
+      if (!apiExists) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: API does not belong to your organization',
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+    
+    const analytics = await tykGatewayService.getAnalytics(api_id, resolution, from, to, orgContext.orgId);
+    
+    await logTykOperation(req, 'get_analytics', 'analytics', api_id || 'all', {
+      requestId: requestId,
+      resolution: resolution,
+      dateRange: from && to ? `${from} to ${to}` : 'default'
+    });
+
+    res.json({
+      success: true,
+      data: analytics,
+      params: {
+        api_id: api_id || 'all',
+        resolution: resolution,
+        from: from,
+        to: to,
+        organization: orgContext.organizationName
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error(`💥 [${requestId}] Failed to fetch analytics:`, error);
+    
+    await logTykOperation(req, 'get_analytics', 'analytics', req.query.api_id || 'all', {
+      requestId: requestId
+    }, error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch analytics',
+      error: error.message
+    });
+  }
+});
+
+module.exports = router;
