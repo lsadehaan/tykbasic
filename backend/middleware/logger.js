@@ -26,12 +26,14 @@ const logger = (req, res, next) => {
   const startTime = Date.now();
   
   // Log request
-  const requestInfo = {
+  const logData = {
+    timestamp: new Date().toISOString(),
     method: req.method,
-    url: req.url,
+    url: req.originalUrl,
     ip: req.ip,
-    userAgent: req.get('User-Agent'),
-    timestamp: new Date().toISOString()
+    userAgent: req.headers['user-agent'],
+    userId: req.user?.id,
+    organizationId: req.user?.organization_id
   };
 
   // Override res.end to capture response info
@@ -41,7 +43,7 @@ const logger = (req, res, next) => {
     
     // Log response
     requestLogger.info({
-      ...requestInfo,
+      ...logData,
       statusCode: res.statusCode,
       duration: `${duration}ms`,
       responseSize: res.get('Content-Length') || 0

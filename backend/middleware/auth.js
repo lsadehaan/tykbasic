@@ -7,7 +7,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-i
 const authenticateToken = async (req, res, next) => {
   const startTime = Date.now();
   const clientIP = req.ip || req.connection.remoteAddress;
-  const userAgent = req.get('User-Agent');
+  const userAgent = req.headers['user-agent'];
   const requestId = Math.random().toString(36).substring(7);
   const path = req.path;
   const method = req.method;
@@ -65,7 +65,11 @@ const authenticateToken = async (req, res, next) => {
     // Get user from database (to ensure user still exists and is active)
     const userLookupStart = Date.now();
     const user = await User.findByPk(decoded.id, {
-      include: [{ model: Organization, as: 'organization' }],
+      include: [{ 
+        model: Organization,
+        as: 'organization',
+        required: true
+      }],
       attributes: { exclude: ['password'] } // Don't include password
     });
     const userLookupDuration = Date.now() - userLookupStart;

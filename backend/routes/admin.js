@@ -210,7 +210,7 @@ router.put('/users/:id', async (req, res) => {
         targetUser: user.email
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.json({
@@ -270,7 +270,7 @@ router.delete('/users/:id', requireRole(['super_admin']), async (req, res) => {
         deletedUserRole: user.role
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.json({
@@ -417,7 +417,7 @@ router.post('/pending-users/:id/approve', async (req, res) => {
             sentBy: req.user.email
           },
           ip_address: req.ip,
-          user_agent: req.get('User-Agent')
+          user_agent: req.headers['user-agent']
         });
       } else {
         console.error(`❌ Failed to send welcome email to ${newUser.email}:`, welcomeResult.error);
@@ -435,7 +435,7 @@ router.post('/pending-users/:id/approve', async (req, res) => {
             sentBy: req.user.email
           },
           ip_address: req.ip,
-          user_agent: req.get('User-Agent')
+          user_agent: req.headers['user-agent']
         });
       }
     } catch (emailError) {
@@ -454,7 +454,7 @@ router.post('/pending-users/:id/approve', async (req, res) => {
           sentBy: req.user.email
         },
         ip_address: req.ip,
-        user_agent: req.get('User-Agent')
+        user_agent: req.headers['user-agent']
       });
     }
 
@@ -472,7 +472,7 @@ router.post('/pending-users/:id/approve', async (req, res) => {
         organization: pendingUser.organization?.name
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.json({
@@ -516,7 +516,7 @@ router.post('/pending-users/:id/reject', async (req, res) => {
         reason: reason || 'No reason provided'
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     await pendingUser.destroy();
@@ -599,7 +599,7 @@ router.post('/email-whitelist', async (req, res) => {
         description: description
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.status(201).json({
@@ -655,7 +655,7 @@ router.put('/email-whitelist/:id', async (req, res) => {
         pattern: whitelistPattern.pattern
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.json({
@@ -704,7 +704,7 @@ router.delete('/email-whitelist/:id', async (req, res) => {
         deletedPattern: whitelistPattern.pattern
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.json({
@@ -1072,9 +1072,10 @@ router.post('/organizations', async (req, res) => {
       }
     }
 
-    // Generate Tyk-compatible organization ID
-    const tykOrgId = name.toLowerCase().replace(/[^a-z0-9]/g, '') + '_' + Date.now();
-    
+    // Generate a unique organization ID for Tyk Gateway scoping
+    const tykOrgId = `${name.toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}`;
+    let tykOrgKey = null;
+
     // Prepare rate limits with defaults
     const orgRateLimits = {
       allowance: 10000,
@@ -1084,47 +1085,6 @@ router.post('/organizations', async (req, res) => {
       quota_renewal_rate: 3600,
       ...defaultRateLimits
     };
-
-    // Create organization in Tyk Gateway first
-    let tykOrgKey = null;
-    try {
-      const tykGatewayService = require('../services/TykGatewayService');
-      
-      // Create organization key in Tyk (this represents the organization in Tyk)
-      const tykOrgData = {
-        org_id: tykOrgId,
-        allowance: orgRateLimits.allowance,
-        rate: orgRateLimits.rate,
-        per: orgRateLimits.per,
-        quota_max: orgRateLimits.quota_max,
-        quota_renewal_rate: orgRateLimits.quota_renewal_rate,
-        is_inactive: false,
-        tags: [`org:${name}`, 'managed_by_tykbasic']
-      };
-
-      console.log(`🏢 Creating Tyk organization for: ${name}`, {
-        tykOrgId,
-        rateLimits: orgRateLimits
-      });
-
-      // Create organization key in Tyk using org keys endpoint
-      const tykResponse = await tykGatewayService.makeRequest('PUT', `/tyk/org/keys/${tykOrgId}`, tykOrgData);
-      
-      if (tykResponse.success) {
-        tykOrgKey = tykResponse.data.key || tykOrgId;
-        console.log(`✅ Successfully created Tyk organization: ${tykOrgId}`);
-      } else {
-        throw new Error(`Tyk organization creation failed: ${tykResponse.error}`);
-      }
-
-    } catch (tykError) {
-      console.error('❌ Failed to create organization in Tyk Gateway:', tykError);
-      return res.status(500).json({
-        error: 'Tyk Gateway integration failed',
-        message: 'Failed to create organization in Tyk Gateway. Please ensure Tyk Gateway is running and properly configured.',
-        details: tykError.message
-      });
-    }
 
     // Create organization in local database
     const organization = await Organization.create({
@@ -1167,22 +1127,20 @@ router.post('/organizations', async (req, res) => {
         organizationName: organization.name,
         tykOrgId: organization.tyk_org_id,
         createdBy: req.user.email,
-        autoAssignDomains: autoAssignDomains,
-        tykIntegration: 'success'
+        autoAssignDomains: autoAssignDomains
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     console.log(`🎉 Organization created successfully:`, {
       name: organization.name,
       id: organization.id,
-      tykOrgId: organization.tyk_org_id,
-      tykOrgKey: !!organization.tyk_org_key
+      tykOrgId: organization.tyk_org_id
     });
 
     res.status(201).json({
-      message: 'Organization created successfully with Tyk Gateway integration',
+      message: 'Organization created successfully',
       organization: {
         id: organization.id,
         name: organization.name,
@@ -1300,7 +1258,7 @@ router.put('/organizations/:id', async (req, res) => {
         changes: req.body
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.json({
@@ -1435,7 +1393,7 @@ router.delete('/organizations/:id', requireRole(['super_admin']), async (req, re
         deletedBy: req.user.email
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.json({
@@ -1512,7 +1470,7 @@ router.post('/organizations/:id/users', async (req, res) => {
         changedBy: req.user.email
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.json({
@@ -1595,7 +1553,7 @@ router.delete('/organizations/:id/users/:userId', async (req, res) => {
         removedBy: req.user.email
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.json({
@@ -1695,7 +1653,7 @@ router.post('/email-config', async (req, res) => {
         updatedBy: req.user.email
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     res.json({
@@ -1778,7 +1736,7 @@ router.post('/email-config/test', async (req, res) => {
         messageId: result.messageId
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     if (result.success) {

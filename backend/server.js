@@ -168,6 +168,27 @@ async function startServer() {
     } catch (emailError) {
       appLogger.error('❌ Email service initialization failed:', emailError.message);
     }
+
+    // Initialize Tyk Gateway service
+    try {
+      const tykGatewayService = require('./services/TykGatewayService');
+      const tykConfigured = await tykGatewayService.initialize();
+      if (tykConfigured) {
+        appLogger.info('✅ Tyk Gateway service initialized successfully');
+        
+        // Test Tyk Gateway connection
+        const healthCheck = await tykGatewayService.healthCheck();
+        if (healthCheck.status === 'healthy') {
+          appLogger.info('✅ Tyk Gateway is healthy and responsive');
+        } else {
+          appLogger.warn('⚠️  Tyk Gateway health check failed:', healthCheck.message);
+        }
+      } else {
+        appLogger.warn('⚠️  Tyk Gateway service not configured - API management will not work');
+      }
+    } catch (tykError) {
+      appLogger.error('❌ Tyk Gateway service initialization failed:', tykError.message);
+    }
     
     // Start server
     app.listen(PORT, () => {

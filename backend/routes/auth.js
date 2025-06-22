@@ -5,6 +5,9 @@ const rateLimit = require('express-rate-limit');
 const { v4: uuidv4 } = require('uuid');
 const { User, Organization, EmailWhitelist, PendingUser, AuditLog } = require('../models');
 const { Op } = require('sequelize');
+const authService = require('../services/AuthService');
+const { authenticateToken } = require('../middleware/auth');
+const { logTykOperation } = require('../utils/auditLogger');
 
 const router = express.Router();
 
@@ -99,7 +102,13 @@ router.get('/health', (req, res) => {
   });
 });
 
-// Register endpoint
+/**
+ * @route POST /api/auth/register
+ * @desc Register a new user
+ * @access Public
+ * @param {Object} req.body - User registration data including email, password, name
+ * @returns {Object} Created user data
+ */
 router.post('/register', authLimiter, async (req, res) => {
   const startTime = Date.now();
   const clientIP = req.ip || req.connection.remoteAddress;
@@ -261,11 +270,17 @@ router.post('/register', authLimiter, async (req, res) => {
   }
 });
 
-// Login endpoint
+/**
+ * @route POST /api/auth/login
+ * @desc Authenticate user and get JWT token
+ * @access Public
+ * @param {Object} req.body - Login credentials including email and password
+ * @returns {Object} JWT token and user data
+ */
 router.post('/login', authLimiter, async (req, res) => {
   const startTime = Date.now();
   const clientIP = req.ip || req.connection.remoteAddress;
-  const userAgent = req.get('User-Agent');
+  const userAgent = req.headers['user-agent'];
   const requestId = Math.random().toString(36).substring(7);
   
   console.log(`🔐 [${requestId}] Login attempt started:`, {
@@ -364,7 +379,7 @@ router.post('/login', authLimiter, async (req, res) => {
           failedAttempts: user.failed_login_attempts
         },
         ip_address: req.ip,
-        user_agent: req.get('User-Agent')
+        user_agent: req.headers['user-agent']
       });
 
       const lockoutMinutes = Math.ceil((user.account_locked_until - new Date()) / (1000 * 60));
@@ -410,7 +425,7 @@ router.post('/login', authLimiter, async (req, res) => {
           failedAttempts: user.failed_login_attempts
         },
         ip_address: req.ip,
-        user_agent: req.get('User-Agent')
+        user_agent: req.headers['user-agent']
       });
 
       // Check if account is now locked after this attempt
@@ -449,7 +464,7 @@ router.post('/login', authLimiter, async (req, res) => {
           requestId: requestId
         },
         ip_address: req.ip,
-        user_agent: req.get('User-Agent')
+        user_agent: req.headers['user-agent']
       });
 
       return res.status(202).json({
@@ -500,7 +515,7 @@ router.post('/login', authLimiter, async (req, res) => {
         totalDuration: `${Date.now() - startTime}ms`
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.headers['user-agent']
     });
 
     const totalDuration = Date.now() - startTime;
@@ -513,6 +528,11 @@ router.post('/login', authLimiter, async (req, res) => {
       totalDuration: `${totalDuration}ms`,
       ip: clientIP,
       timestamp: new Date().toISOString()
+    });
+
+    await logTykOperation(user.id, 'user_login', {
+      user_id: user.id,
+      user_email: user.email
     });
 
     res.json({
@@ -557,7 +577,7 @@ router.post('/login', authLimiter, async (req, res) => {
           duration: `${totalDuration}ms`
         },
         ip_address: req.ip,
-        user_agent: req.get('User-Agent'),
+        user_agent: req.headers['user-agent'],
         status: 'error',
         error_message: error.message
       });
@@ -572,317 +592,124 @@ router.post('/login', authLimiter, async (req, res) => {
   }
 });
 
-// Logout endpoint
-router.post('/logout', (req, res) => {
-  // For JWT tokens, logout is handled client-side by removing the token
-  // In a production system, you might want to maintain a blacklist of tokens
-  res.json({
-    message: 'Logout successful',
-    details: 'Please remove the authentication token from your client.'
-  });
+/**
+ * @route POST /api/auth/logout
+ * @desc Logout user and invalidate token
+ * @access Private (requires authentication)
+ * @returns {Object} Logout result
+ */
+router.post('/logout', authenticateToken, async (req, res) => {
+  try {
+    await authService.logout(req.user.id);
+    await logTykOperation(req.user.id, 'user_logout', {
+      user_id: req.user.id,
+      user_email: req.user.email
+    });
+    res.json({ message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('Logout failed:', error);
+    res.status(500).json({ error: 'Logout failed' });
+  }
 });
 
-// Get current user info (requires authentication)
-const { authenticateToken } = require('../middleware/auth');
-
+/**
+ * @route GET /api/auth/me
+ * @desc Get current user's profile
+ * @access Private (requires authentication)
+ * @returns {Object} User profile data
+ */
 router.get('/me', authenticateToken, async (req, res) => {
   try {
-    const user = req.user;
-    
-    res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.first_name,
-        lastName: user.last_name,
-        role: user.role,
-        status: user.status,
-        lastLogin: user.last_login,
-        loginCount: user.login_count,
-        organization: user.organization ? {
-          id: user.organization.id,
-          name: user.organization.name,
-          displayName: user.organization.display_name
-        } : null,
-        createdAt: user.created_at,
-        updatedAt: user.updated_at
-      }
-    });
+    const user = await authService.getCurrentUser(req.user.id);
+    res.json(user);
   } catch (error) {
-    console.error('Get user info error:', error);
-    res.status(500).json({
-      error: 'Failed to get user info',
-      message: 'An error occurred while retrieving user information.'
-    });
+    console.error('Failed to get user profile:', error);
+    res.status(500).json({ error: 'Failed to get user profile' });
   }
 });
 
-// Password reset request endpoint
-router.post('/password-reset', authLimiter, async (req, res) => {
+/**
+ * @route POST /api/auth/refresh-token
+ * @desc Refresh JWT token
+ * @access Private (requires authentication)
+ * @returns {Object} New JWT token
+ */
+router.post('/refresh-token', authenticateToken, async (req, res) => {
   try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        error: 'Missing email',
-        message: 'Email address is required for password reset.'
-      });
-    }
-
-    const user = await User.findByEmail(email);
-    
-    if (!user) {
-      // Return success even if user doesn't exist (security best practice)
-      return res.json({
-        message: 'If an account with that email exists, a password reset link has been sent.',
-        email: email.toLowerCase()
-      });
-    }
-
-    if (!user.is_active) {
-      return res.status(403).json({
-        error: 'Account inactive',
-        message: 'Cannot reset password for inactive account.'
-      });
-    }
-
-    // Generate reset token
-    const resetToken = user.generatePasswordResetToken();
-    await user.save();
-
-    // Log password reset request
-    await AuditLog.create({
-      action: 'password_reset_requested',
-      resource_type: 'user',
-      resource_id: user.id,
-      details: { 
-        email: user.email,
-        token_expires: user.password_reset_expires
-      },
-      ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+    const token = await authService.refreshToken(req.user.id);
+    await logTykOperation(req.user.id, 'token_refresh', {
+      user_id: req.user.id,
+      user_email: req.user.email
     });
-
-    // Send password reset email
-    try {
-      const emailService = require('../services/emailService');
-      const emailResult = await emailService.sendPasswordResetEmail(
-        user.email, 
-        resetToken, 
-        user.first_name
-      );
-
-      if (emailResult.success) {
-        console.log(`✅ Password reset email sent to ${user.email}`);
-        
-        // Log successful email sending
-        await AuditLog.create({
-          action: 'password_reset_email_sent',
-          resource_type: 'user',
-          resource_id: user.id,
-          details: { 
-            email: user.email,
-            messageId: emailResult.messageId
-          },
-          ip_address: req.ip,
-          user_agent: req.get('User-Agent')
-        });
-      } else {
-        console.error(`❌ Failed to send password reset email to ${user.email}:`, emailResult.error);
-        
-        // Log failed email sending
-        await AuditLog.create({
-          action: 'password_reset_email_failed',
-          resource_type: 'user',
-          resource_id: user.id,
-          details: { 
-            email: user.email,
-            error: emailResult.error
-          },
-          ip_address: req.ip,
-          user_agent: req.get('User-Agent')
-        });
-      }
-    } catch (emailError) {
-      console.error('Email service error during password reset:', emailError);
-      
-      // Log email service error
-      await AuditLog.create({
-        action: 'password_reset_email_error',
-        resource_type: 'user',
-        resource_id: user.id,
-        details: { 
-          email: user.email,
-          error: emailError.message
-        },
-        ip_address: req.ip,
-        user_agent: req.get('User-Agent')
-      });
-    }
-
-    // For development, also log the reset link to console
-    if (process.env.NODE_ENV === 'development') {
-      const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}`;
-      console.log(`🔗 Password reset link for ${user.email}: ${resetLink}`);
-    }
-
-    res.json({
-      message: 'If an account with that email exists, a password reset link has been sent.',
-      email: email.toLowerCase()
-    });
-
+    res.json({ token });
   } catch (error) {
-    console.error('Password reset request error:', error);
-    res.status(500).json({
-      error: 'Password reset failed',
-      message: 'An error occurred during password reset. Please try again.'
-    });
+    console.error('Token refresh failed:', error);
+    res.status(401).json({ error: 'Token refresh failed' });
   }
 });
 
-// Password reset confirmation endpoint
-router.post('/password-reset/confirm', authLimiter, async (req, res) => {
+/**
+ * @route POST /api/auth/change-password
+ * @desc Change user's password
+ * @access Private (requires authentication)
+ * @param {Object} req.body - Password change data including current and new password
+ * @returns {Object} Password change result
+ */
+router.post('/change-password', authenticateToken, async (req, res) => {
   try {
-    const { token, password } = req.body;
-
-    if (!token || !password) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        message: 'Reset token and new password are required.'
-      });
-    }
-
-    // Enhanced password strength validation
-    const passwordValidation = validatePasswordStrength(password);
-    if (!passwordValidation.isValid) {
-      return res.status(400).json({
-        error: 'Weak password',
-        message: 'Password does not meet security requirements.',
-        details: passwordValidation.feedback
-      });
-    }
-
-    const user = await User.findOne({
-      where: {
-        password_reset_token: token,
-        password_reset_expires: {
-          [Op.gt]: new Date()
-        }
-      }
+    const result = await authService.changePassword(
+      req.user.id,
+      req.body.currentPassword,
+      req.body.newPassword
+    );
+    await logTykOperation(req.user.id, 'password_change', {
+      user_id: req.user.id,
+      user_email: req.user.email
     });
-
-    if (!user) {
-      return res.status(400).json({
-        error: 'Invalid or expired token',
-        message: 'Password reset token is invalid or has expired.'
-      });
-    }
-
-    if (!user.is_active) {
-      return res.status(403).json({
-        error: 'Account inactive',
-        message: 'Cannot reset password for inactive account.'
-      });
-    }
-
-    // Update password and clear reset token
-    user.password = password;
-    user.password_reset_token = null;
-    user.password_reset_expires = null;
-    user.failed_login_attempts = 0;
-    user.account_locked_until = null;
-    await user.save();
-
-    // Log successful password reset
-    await AuditLog.create({
-      action: 'password_reset_completed',
-      resource_type: 'user',
-      resource_id: user.id,
-      user_id: user.id,
-      details: { 
-        email: user.email,
-        reset_method: 'token'
-      },
-      ip_address: req.ip,
-      user_agent: req.get('User-Agent')
-    });
-
-    res.json({
-      message: 'Password reset successful. You can now log in with your new password.',
-      email: user.email
-    });
-
+    res.json(result);
   } catch (error) {
-    console.error('Password reset confirm error:', error);
-    res.status(500).json({
-      error: 'Password reset failed',
-      message: 'An error occurred during password reset. Please try again.'
-    });
+    console.error('Password change failed:', error);
+    res.status(400).json({ error: 'Password change failed' });
   }
 });
 
-// Email verification endpoint
-router.post('/verify-email', async (req, res) => {
+/**
+ * @route POST /api/auth/forgot-password
+ * @desc Request password reset
+ * @access Public
+ * @param {Object} req.body - Email address for password reset
+ * @returns {Object} Password reset request result
+ */
+router.post('/forgot-password', async (req, res) => {
   try {
-    const { token } = req.body;
-
-    if (!token) {
-      return res.status(400).json({
-        error: 'Missing token',
-        message: 'Verification token is required.'
-      });
-    }
-
-    const user = await User.findOne({
-      where: {
-        email_verification_token: token,
-        email_verification_expires: {
-          [Op.gt]: new Date()
-        }
-      }
+    const result = await authService.requestPasswordReset(req.body.email);
+    await logTykOperation(null, 'password_reset_request', {
+      user_email: req.body.email
     });
-
-    if (!user) {
-      return res.status(400).json({
-        error: 'Invalid or expired token',
-        message: 'Email verification token is invalid or has expired.'
-      });
-    }
-
-    // Verify email
-    user.is_verified = true;
-    user.email_verification_token = null;
-    user.email_verification_expires = null;
-    await user.save();
-
-    // Log email verification
-    await AuditLog.create({
-      action: 'email_verified',
-      resource_type: 'user',
-      resource_id: user.id,
-      user_id: user.id,
-      details: { 
-        email: user.email
-      },
-      ip_address: req.ip,
-      user_agent: req.get('User-Agent')
-    });
-
-    res.json({
-      message: 'Email verification successful.',
-      user: {
-        id: user.id,
-        email: user.email,
-        isVerified: user.is_verified
-      }
-    });
-
+    res.json(result);
   } catch (error) {
-    console.error('Email verification error:', error);
-    res.status(500).json({
-      error: 'Email verification failed',
-      message: 'An error occurred during email verification. Please try again.'
+    console.error('Password reset request failed:', error);
+    res.status(400).json({ error: 'Password reset request failed' });
+  }
+});
+
+/**
+ * @route POST /api/auth/reset-password
+ * @desc Reset password using reset token
+ * @access Public
+ * @param {Object} req.body - Reset token and new password
+ * @returns {Object} Password reset result
+ */
+router.post('/reset-password', async (req, res) => {
+  try {
+    const result = await authService.resetPassword(req.body.token, req.body.newPassword);
+    await logTykOperation(null, 'password_reset', {
+      user_email: result.email
     });
+    res.json(result);
+  } catch (error) {
+    console.error('Password reset failed:', error);
+    res.status(400).json({ error: 'Password reset failed' });
   }
 });
 

@@ -32,19 +32,33 @@ const logAuditEvent = (action, userId, organizationId, details = {}) => {
 };
 
 // Tyk operation logging function (for policies route)
-const logTykOperation = async (req, action, resourceType, resourceId, details = {}) => {
-  const logData = {
-    action,
-    resourceType,
-    resourceId,
-    userId: req.user?.id,
-    userEmail: req.user?.email,
-    organizationId: req.user?.organization_id,
-    ipAddress: req.ip,
-    userAgent: req.get('User-Agent'),
-    details,
-    timestamp: new Date().toISOString()
-  };
+const logTykOperation = async (userIdOrReq, action, resourceTypeOrDetails, resourceId, details = {}) => {
+  let logData;
+  
+  // Handle both request object and direct parameter cases
+  if (typeof userIdOrReq === 'object' && userIdOrReq !== null) {
+    // Request object case
+    logData = {
+      action,
+      resourceType: resourceTypeOrDetails,
+      resourceId,
+      userId: userIdOrReq.user?.id,
+      userEmail: userIdOrReq.user?.email,
+      organizationId: userIdOrReq.user?.organization_id,
+      ipAddress: userIdOrReq.ip,
+      userAgent: userIdOrReq.headers?.['user-agent'],
+      details,
+      timestamp: new Date().toISOString()
+    };
+  } else {
+    // Direct parameter case
+    logData = {
+      action,
+      userId: userIdOrReq,
+      details: resourceTypeOrDetails,
+      timestamp: new Date().toISOString()
+    };
+  }
   
   auditLogger.info('Tyk Operation', logData);
   return logData;

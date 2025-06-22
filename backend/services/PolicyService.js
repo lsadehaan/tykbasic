@@ -4,9 +4,29 @@ const tykGatewayService = require('./TykGatewayService');
 const { Op } = require('sequelize');
 const { v4: uuidv4 } = require('uuid');
 
+/**
+ * Service class for managing Tyk Gateway policies.
+ * Handles policy creation, updates, and deletion in both Tyk Gateway and local database.
+ * Manages policy-API relationships and organization policy assignments.
+ */
 class PolicyService {
   /**
-   * Create a new policy in both Tyk and our database
+   * Creates a new policy in both Tyk Gateway and local database.
+   * Handles policy creation with proper organization context and API access rights.
+   * 
+   * @param {Object} policyData - Policy configuration data
+   * @param {string} policyData.name - Name of the policy
+   * @param {string} [policyData.description] - Policy description
+   * @param {number} [policyData.rate_limit] - Rate limit per period
+   * @param {number} [policyData.rate_per] - Rate limit period in seconds
+   * @param {number} [policyData.quota_max] - Maximum quota (-1 for unlimited)
+   * @param {number} [policyData.quota_renewal_rate] - Quota renewal period in seconds
+   * @param {Array} [policyData.api_accesses] - List of API access configurations
+   * @param {string} [policyData.target_organization_id] - Target organization ID
+   * @param {Array} [policyData.tags] - Policy tags
+   * @param {string} creatorUserId - ID of the user creating the policy
+   * @returns {Promise<Object>} Created policy data
+   * @throws {Error} If policy creation fails
    */
   async createPolicy(policyData, creatorUserId) {
     const transaction = await sequelize.transaction();
@@ -365,7 +385,21 @@ class PolicyService {
   }
 
   /**
-   * Update a policy
+   * Updates an existing policy in both Tyk Gateway and local database.
+   * 
+   * @param {string} policyId - ID of the policy to update
+   * @param {Object} updates - Policy update data
+   * @param {string} [updates.name] - New policy name
+   * @param {string} [updates.description] - New policy description
+   * @param {number} [updates.rate_limit] - New rate limit
+   * @param {number} [updates.rate_per] - New rate period
+   * @param {number} [updates.quota_max] - New quota maximum
+   * @param {number} [updates.quota_renewal_rate] - New quota renewal rate
+   * @param {Array} [updates.tags] - New policy tags
+   * @param {boolean} [updates.is_active] - New active status
+   * @param {string} updaterUserId - ID of the user updating the policy
+   * @returns {Promise<Object>} Updated policy data
+   * @throws {Error} If policy update fails
    */
   async updatePolicy(policyId, updates, updaterUserId) {
     const transaction = await sequelize.transaction();
@@ -418,7 +452,12 @@ class PolicyService {
   }
 
   /**
-   * Delete a policy
+   * Deletes a policy from both Tyk Gateway and local database.
+   * 
+   * @param {string} policyId - ID of the policy to delete
+   * @param {string} deleterUserId - ID of the user deleting the policy
+   * @returns {Promise<Object>} Deletion result
+   * @throws {Error} If policy deletion fails
    */
   async deletePolicy(policyId, deleterUserId) {
     const transaction = await sequelize.transaction();

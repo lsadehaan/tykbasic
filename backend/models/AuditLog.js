@@ -150,7 +150,7 @@ module.exports = (sequelize, DataTypes) => {
 
     if (req) {
       logData.ip_address = req.ip || req.connection?.remoteAddress;
-      logData.user_agent = req.get('User-Agent');
+      logData.user_agent = req.headers['user-agent'];
       logData.request_method = req.method;
       logData.request_path = req.path;
     }
@@ -158,24 +158,17 @@ module.exports = (sequelize, DataTypes) => {
     return this.create(logData);
   };
 
-  AuditLog.logAuthEvent = async function(userId, action, status = 'success', errorMessage = null, req = null) {
+  AuditLog.logAuthEvent = async function(req, action, details = {}) {
     const logData = {
-      user_id: userId,
       action,
-      resource_type: 'Authentication',
-      description: `User ${action.toLowerCase()}`,
-      status,
-      error_message: errorMessage,
-      severity: status === 'success' ? 'info' : 'warning'
+      resource_type: 'auth',
+      user_id: req.user?.id,
+      organization_id: req.user?.organization_id,
+      details,
+      ip_address: req.ip,
+      user_agent: req.headers['user-agent'],
+      status: 'success'
     };
-
-    if (req) {
-      logData.ip_address = req.ip || req.connection?.remoteAddress;
-      logData.user_agent = req.get('User-Agent');
-      logData.request_method = req.method;
-      logData.request_path = req.path;
-    }
-
     return this.create(logData);
   };
 
@@ -215,25 +208,18 @@ module.exports = (sequelize, DataTypes) => {
     );
   };
 
-  AuditLog.logAdminAction = async function(adminId, action, resourceType, resourceId, description, details = {}, req = null) {
+  AuditLog.logAdminAction = async function(req, action, resourceType, resourceId, details = {}) {
     const logData = {
-      user_id: adminId,
       action,
       resource_type: resourceType,
       resource_id: resourceId,
-      description,
+      user_id: req.user?.id,
+      organization_id: req.user?.organization_id,
       details,
-      status: 'success',
-      severity: 'warning' // Admin actions are generally more important
+      ip_address: req.ip,
+      user_agent: req.headers['user-agent'],
+      status: 'success'
     };
-
-    if (req) {
-      logData.ip_address = req.ip || req.connection?.remoteAddress;
-      logData.user_agent = req.get('User-Agent');
-      logData.request_method = req.method;
-      logData.request_path = req.path;
-    }
-
     return this.create(logData);
   };
 
@@ -249,26 +235,18 @@ module.exports = (sequelize, DataTypes) => {
     });
   };
 
-  AuditLog.logError = async function(userId, action, resourceType, resourceId, errorMessage, details = {}, req = null) {
+  AuditLog.logError = async function(req, action, error, details = {}) {
     const logData = {
-      user_id: userId,
       action,
-      resource_type: resourceType,
-      resource_id: resourceId,
-      description: `Error during ${action}`,
-      details,
+      resource_type: 'error',
+      user_id: req.user?.id,
+      organization_id: req.user?.organization_id,
+      details: { ...details, error: error.message },
+      ip_address: req.ip,
+      user_agent: req.headers['user-agent'],
       status: 'error',
-      error_message: errorMessage,
-      severity: 'error'
+      error_message: error.message
     };
-
-    if (req) {
-      logData.ip_address = req.ip || req.connection?.remoteAddress;
-      logData.user_agent = req.get('User-Agent');
-      logData.request_method = req.method;
-      logData.request_path = req.path;
-    }
-
     return this.create(logData);
   };
 

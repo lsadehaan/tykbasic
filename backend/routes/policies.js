@@ -4,7 +4,14 @@ const policyService = require('../services/PolicyService');
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const { logTykOperation } = require('../utils/auditLogger');
 
-// Helper function to get Tyk organization context from request
+/**
+ * Helper function to extract Tyk organization context from request.
+ * Ensures user has valid organization context for policy operations.
+ * 
+ * @param {Object} req - Express request object
+ * @returns {Object} Organization context with orgId, orgKey, and orgContext
+ * @throws {Error} If user has no valid organization context
+ */
 const getTykOrgContext = (req) => {
   if (!req.user || !req.user.organization) {
     throw new Error('User does not have valid organization context');
@@ -17,7 +24,12 @@ const getTykOrgContext = (req) => {
   };
 };
 
-// Get available policies for current organization (for end users)
+/**
+ * @route GET /api/policies/available
+ * @desc Get available policies for current organization (for end users)
+ * @access Private (requires authentication)
+ * @returns {Object} List of available policies with success status and timestamp
+ */
 router.get('/available', authenticateToken, async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   
@@ -57,7 +69,12 @@ router.get('/available', authenticateToken, async (req, res) => {
   }
 });
 
-// Get policies created by current organization (for admins)
+/**
+ * @route GET /api/policies/created
+ * @desc Get policies created by current organization (for admins)
+ * @access Private (requires admin role)
+ * @returns {Object} List of created policies with success status and timestamp
+ */
 router.get('/created', authenticateToken, requireRole(['admin', 'super_admin']), async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   
@@ -97,7 +114,13 @@ router.get('/created', authenticateToken, requireRole(['admin', 'super_admin']),
   }
 });
 
-// Get single policy details
+/**
+ * @route GET /api/policies/:policyId
+ * @desc Get single policy details
+ * @access Private (requires authentication)
+ * @param {string} req.params.policyId - Policy ID
+ * @returns {Object} Policy details with success status and timestamp
+ */
 router.get('/:policyId', authenticateToken, async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   const { policyId } = req.params;
@@ -155,7 +178,13 @@ router.get('/:policyId', authenticateToken, async (req, res) => {
   }
 });
 
-// Create new policy (admin only)
+/**
+ * @route POST /api/policies
+ * @desc Create new policy (admin only)
+ * @access Private (requires admin role)
+ * @param {Object} req.body - Policy configuration data
+ * @returns {Object} Created policy data with success status and timestamp
+ */
 router.post('/', authenticateToken, requireRole(['admin', 'super_admin']), async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   
@@ -249,7 +278,14 @@ router.post('/', authenticateToken, requireRole(['admin', 'super_admin']), async
   }
 });
 
-// Update policy (admin only)
+/**
+ * @route PUT /api/policies/:policyId
+ * @desc Update policy (admin only)
+ * @access Private (requires admin role)
+ * @param {string} req.params.policyId - Policy ID
+ * @param {Object} req.body - Updated policy data
+ * @returns {Object} Updated policy data with success status and timestamp
+ */
 router.put('/:policyId', authenticateToken, requireRole(['admin', 'super_admin']), async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   const { policyId } = req.params;
@@ -321,7 +357,13 @@ router.put('/:policyId', authenticateToken, requireRole(['admin', 'super_admin']
   }
 });
 
-// Delete policy (admin only)
+/**
+ * @route DELETE /api/policies/:policyId
+ * @desc Delete policy (admin only)
+ * @access Private (requires admin role)
+ * @param {string} req.params.policyId - Policy ID
+ * @returns {Object} Deletion result with success status and timestamp
+ */
 router.delete('/:policyId', authenticateToken, requireRole(['admin', 'super_admin']), async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   const { policyId } = req.params;
@@ -378,7 +420,14 @@ router.delete('/:policyId', authenticateToken, requireRole(['admin', 'super_admi
   }
 });
 
-// Assign policy to organization (super admin only)
+/**
+ * @route POST /api/policies/:policyId/assign/:organizationId
+ * @desc Assign policy to organization (super admin only)
+ * @access Private (requires super admin role)
+ * @param {string} req.params.policyId - Policy ID
+ * @param {string} req.params.organizationId - Organization ID
+ * @returns {Object} Assignment result with success status and timestamp
+ */
 router.post('/:policyId/assign/:organizationId', authenticateToken, requireRole(['super_admin']), async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   const { policyId, organizationId } = req.params;
@@ -422,7 +471,14 @@ router.post('/:policyId/assign/:organizationId', authenticateToken, requireRole(
   }
 });
 
-// Remove policy from organization (super admin only)
+/**
+ * @route DELETE /api/policies/:policyId/assign/:organizationId
+ * @desc Remove policy from organization (super admin only)
+ * @access Private (requires super admin role)
+ * @param {string} req.params.policyId - Policy ID
+ * @param {string} req.params.organizationId - Organization ID
+ * @returns {Object} Removal result with success status and timestamp
+ */
 router.delete('/:policyId/assign/:organizationId', authenticateToken, requireRole(['super_admin']), async (req, res) => {
   const requestId = Math.random().toString(36).substring(7);
   const { policyId, organizationId } = req.params;

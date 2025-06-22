@@ -60,7 +60,7 @@ const logTykOperation = async (req, action, resourceType, resourceId, details, e
         organizationName: orgContext.organizationName
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent'),
+      user_agent: req.headers['user-agent'],
       status: error ? 'error' : 'success',
       error_message: error?.message
     });
@@ -217,15 +217,26 @@ router.post('/apis', async (req, res) => {
     const orgContext = await getTykOrgContext(req);
     console.log(`🆕 [${requestId}] Creating API for user: ${req.user.email} (org: ${orgContext.organizationName})`, {
       apiName: req.body.name,
-      listenPath: req.body.proxy?.listen_path
+      listenPath: req.body.proxy?.listen_path,
+      orgId: orgContext.orgId
     });
+    
+    // Ensure the API definition has the required fields
+    if (!req.body.name || !req.body.proxy?.listen_path) {
+      return res.status(400).json({
+        success: false,
+        message: 'API definition must include name and proxy.listen_path',
+        timestamp: new Date().toISOString()
+      });
+    }
     
     const newApi = await tykGatewayService.createApi(req.body, orgContext.orgId);
     
-    await logTykOperation(req, 'create_api', 'api', newApi.key || newApi.id, {
+    await logTykOperation(req, 'create_api', 'api', newApi.key, {
       requestId: requestId,
       apiName: req.body.name,
-      listenPath: req.body.proxy?.listen_path
+      listenPath: req.body.proxy?.listen_path,
+      orgId: orgContext.orgId
     });
 
     res.status(201).json({
@@ -240,7 +251,8 @@ router.post('/apis', async (req, res) => {
     
     await logTykOperation(req, 'create_api', 'api', null, {
       requestId: requestId,
-      apiName: req.body.name
+      apiName: req.body.name,
+      error: error.message
     }, error);
 
     res.status(error.status || 500).json({
@@ -459,7 +471,7 @@ router.get('/keys', async (req, res) => {
         org_filter: orgContext.orgId
       },
       ip_address: req.ip,
-      user_agent: req.get('User-Agent'),
+      user_agent: req.headers['user-agent'],
       status: 'success'
     });
 
@@ -489,7 +501,7 @@ router.get('/keys', async (req, res) => {
           error: error.message
         },
         ip_address: req.ip,
-        user_agent: req.get('User-Agent'),
+        user_agent: req.headers['user-agent'],
         status: 'failed'
       });
     } catch (auditError) {

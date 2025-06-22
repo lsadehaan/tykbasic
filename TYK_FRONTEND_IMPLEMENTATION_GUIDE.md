@@ -1335,3 +1335,248 @@ This fix ensures all future user approvals work correctly. The bug is permanentl
 3. Recovery tools for any affected users
 
 For more details, see `PASSWORD_FIX_DOCUMENTATION.md`. 
+
+## Authentication Implementation
+
+### Core Features
+- JWT-based authentication
+- Two-factor authentication (TOTP)
+- Rate limiting and account lockout
+- Email verification
+- Admin approval workflow
+- Audit logging
+
+### Database Schema
+```sql
+-- Users table
+CREATE TABLE users (
+  id VARCHAR(255) PRIMARY KEY,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  first_name VARCHAR(255),
+  last_name VARCHAR(255),
+  role ENUM('admin', 'user') DEFAULT 'user',
+  organization_id VARCHAR(255) REFERENCES organizations(id),
+  is_active BOOLEAN DEFAULT TRUE,
+  is_verified BOOLEAN DEFAULT FALSE,
+  is_approved BOOLEAN DEFAULT FALSE,
+  two_factor_enabled BOOLEAN DEFAULT FALSE,
+  totp_secret VARCHAR(255),
+  failed_login_attempts INT DEFAULT 0,
+  account_locked_until TIMESTAMP,
+  last_login TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Audit logs
+CREATE TABLE audit_logs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id VARCHAR(255) REFERENCES users(id),
+  action VARCHAR(255) NOT NULL,
+  details JSON,
+  ip_address VARCHAR(45),
+  user_agent TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Implementation Details
+
+#### Authentication Service
+```javascript
+// auth/authService.js
+class AuthService {
+  async login(email, password, totpCode = null) {
+    // 1. Find user
+    const user = await db.users.findByEmail(email);
+    if (!user) {
+      throw new Error('Invalid credentials');
+    }
+    
+    // 2. Check approval status
+    if (!user.is_approved) {
+      throw new Error('Account pending approval');
+    }
+    
+    // 3. Check email verification
+    if (!user.email_verified) {
+      throw new Error('Please verify your email address');
+    }
+    
+    // 4. Verify password
+    const passwordValid = await bcrypt.compare(password, user.password_hash);
+    if (!passwordValid) {
+      throw new Error('Invalid credentials');
+    }
+    
+    // 5. Check 2FA if enabled
+    if (user.two_factor_enabled) {
+      if (!totpCode) {
+        return {
+          status: 'require_2fa',
+          message: 'Two-factor authentication required'
+        };
+      }
+      
+      const totpValid = speakeasy.totp.verify({
+        secret: user.totp_secret,
+        token: totpCode,
+        window: 2
+      });
+      
+      if (!totpValid) {
+        throw new Error('Invalid 2FA code');
+      }
+    }
+    
+    // 6. Generate JWT
+    const token = this.generateJWT(user);
+    
+    return {
+      status: 'success',
+      token,
+      user: this.sanitizeUser(user)
+    };
+  }
+}
+```
+
+#### Frontend Integration
+```javascript
+// contexts/AuthContext.js
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState(localStorage.getItem('token'));
+
+  const checkAuthStatus = async () => {
+    const savedToken = localStorage.getItem('token');
+    if (savedToken) {
+      try {
+        const response = await fetch(`${API_BASE}/auth/me`, {
+          headers: {
+            'Authorization': `Bearer ${savedToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setUser(data.user);
+          setToken(savedToken);
+        } else {
+          localStorage.removeItem('token');
+          setToken(null);
+        }
+      } catch (error) {
+        console.error('Auth check failed:', error);
+        localStorage.removeItem('token');
+        setToken(null);
+      }
+    }
+    setLoading(false);
+  };
+};
+```
+
+## Organization Management
+
+### Core Features
+- Multi-tenant support
+- Organization-based API access
+- User-organization relationships
+- Organization settings
+
+### Database Schema
+```sql
+-- Organizations table
+CREATE TABLE organizations (
+  id VARCHAR(255) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  settings JSON,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Organization members
+CREATE TABLE organization_members (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  organization_id VARCHAR(255) REFERENCES organizations(id),
+  user_id VARCHAR(255) REFERENCES users(id),
+  role ENUM('admin', 'member') DEFAULT 'member',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY org_user (organization_id, user_id)
+);
+```
+
+### Implementation Details
+
+#### Organization Service
+```javascript
+// services/organizationService.js
+class OrganizationService {
+  async createOrganization(data) {
+    const { name, description, settings } = data;
+    
+    const org = await db.organizations.create({
+      name,
+      description,
+      settings: settings || {}
+    });
+    
+    return org;
+  }
+  
+  async addMember(orgId, userId, role = 'member') {
+    await db.organization_members.create({
+      organization_id: orgId,
+      user_id: userId,
+      role
+    });
+  }
+  
+  async getOrganizationMembers(orgId) {
+    return db.organization_members.findAll({
+      where: { organization_id: orgId },
+      include: [{ model: User, as: 'user' }]
+    });
+  }
+}
+```
+
+#### Frontend Integration
+```javascript
+// components/OrganizationManagement.js
+const OrganizationManagement = () => {
+  const [organizations, setOrganizations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
+  useEffect(() => {
+    loadOrganizations();
+  }, []);
+  
+  const loadOrganizations = async () => {
+    try {
+      const response = await api.get('/organizations');
+      setOrganizations(response.data);
+    } catch (error) {
+      console.error('Failed to load organizations:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  return (
+    <div>
+      <h2>Organizations</h2>
+      {loading ? (
+        <LoadingSpinner />
+      ) : (
+        <OrganizationList organizations={organizations} />
+      )}
+    </div>
+  );
+};
+``` 
